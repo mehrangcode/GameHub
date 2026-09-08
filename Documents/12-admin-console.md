@@ -145,7 +145,7 @@ backend/
 │       ├── http/                 # public — MUST NOT import interface/admin/**
 │       └── socket/
 └── scripts/
-    └── sync-contracts.ts         # extended: contracts → frontend AND contracts/admin → admin-frontend
+    └── sync-contracts.mjs        # extended: contracts → frontend AND contracts/admin → admin-frontend
 
 admin-frontend/                   # ★ third independent project — see §8
 ```
@@ -783,7 +783,7 @@ admin-frontend/
   offset-paginate the ledger.
 - **Destructive confirmations name the target.** "Disable `ali@example.com`" typed back, not "are
   you sure?" — the failure mode being a mis-click on the wrong row of a table.
-- **Contract sync** extends `sync-contracts.ts` to a second destination; `contracts:check` now runs
+- **Contract sync** extends `sync-contracts.mjs` to a second destination; `contracts:check` now runs
   in three CI pipelines and the pre-commit hook.
 
 ### 8.4 Proxy and hosting

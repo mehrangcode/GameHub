@@ -1,0 +1,33 @@
+/* Logical properties only — 02-technical-prd.md §8.2. Full RTL is treated as
+   correctness, not polish, and stylelint-plugin-logical-css enforces it.
+   The real design tokens land in S40 (styles/tokens.css). */
+
+:root {
+  --color-bg: #14161a;
+  --color-fg: #f2f3f5;
+  --space-md: 1rem;
+  --space-lg: 2rem;
+
+  color-scheme: dark;
+}
+
+body {
+  margin-block: 0;
+  margin-inline: 0;
+  background-color: var(--color-bg);
+  color: var(--color-fg);
+  font-family: system-ui, sans-serif;
+}
+
+.placeholder {
+  padding-block: var(--space-lg);
+  padding-inline: var(--space-md);
+}
+
+.placeholder dt {
+  font-weight: 600;
+}
+
+.placeholder dd {
+  margin-inline-start: var(--space-md);
+}

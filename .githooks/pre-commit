@@ -1,0 +1,35 @@
+#!/bin/sh
+# Managed by backend/scripts/install-hooks.mjs — regenerate with `npm run hooks:install`.
+set -e
+
+root="$(git rev-parse --show-toplevel)"
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "pre-commit: 'node' is not on PATH, so the contracts check could not run."
+  echo "Refusing rather than skipping — the check exists to stop a drifted mirror"
+  echo "reaching CI. Commit from a shell where node is available."
+  exit 1
+fi
+
+status=0
+
+run_check() {
+  label="$1"
+  script="$2"
+  shift 2
+  [ -f "$root/$script" ] || return 0
+  if ! node "$root/$script" "$@" >/dev/null; then
+    echo "pre-commit: contracts:check failed in $label (see above)."
+    status=1
+  fi
+}
+
+run_check backend        backend/scripts/sync-contracts.mjs   --check
+run_check frontend       frontend/scripts/check-contracts.mjs
+run_check admin-frontend admin-frontend/scripts/check-contracts.mjs
+
+if [ "$status" -ne 0 ]; then
+  echo ""
+  echo "If the mirrors drifted: run 'npm run contracts:sync' in backend/ and stage the result."
+  exit 1
+fi

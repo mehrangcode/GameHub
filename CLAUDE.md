@@ -4,9 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository State
 
-**There is no code yet.** This repository currently contains only `Documents/` — a complete,
-cross-referenced PRD set for a board/card game platform (Express + React) **plus its admin
-console**. The first implementation step is **M0** in `Documents/08-roadmap.md`.
+**M0 Phase A (S01–S06) is built.** `backend/` and `frontend/` exist: TS-strict scaffolds, the three
+architecture lint guards, the Zod-validated environment, the `contracts/` mirror + drift guard, the
+full Prisma schema, and the idempotent seed. No `admin-frontend/` yet (that is milestone MA). The
+next session is **S07** — see `.claude/context/build/context.md`, which is the live cursor and is
+read first, every session.
+
+`Documents/` holds the complete, cross-referenced PRD set for the platform **plus its admin
+console**; `Documents/08-roadmap.md` and `Documents/11-build-plan.md` drive the work.
 
 `Documents/README.md` is the entry point: it holds the document index, the **Decisions Already
 Locked** table, a requirement→document coverage map, and the **Status** table of open questions.

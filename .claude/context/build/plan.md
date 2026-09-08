@@ -40,6 +40,8 @@ From `08-roadmap.md` M0 exit criteria. All of these must be true before M1 start
 Tick when **Mehrang** has run the session's "You verify" steps, not when the code compiles.
 
 ### Phase A — Foundations
+*Built and green (90 backend + 18 frontend tests). Awaiting Mehrang's "You verify" pass — see
+`context.md` for the exact commands and the two caveats.*
 - [ ] S01 Backend scaffold, TS strict, the three load-bearing lint rules
 - [ ] S02 Frontend scaffold, Vite proxy, route stubs
 - [ ] S03 `contracts/` + `contracts:sync` / `contracts:check`

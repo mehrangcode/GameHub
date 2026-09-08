@@ -323,7 +323,10 @@ the build.
   `ClientToServerEvents` maps), `dto/`, and the shared TS unions that replace Prisma enums
   (`TableStatus`, `GameEventKind`, `AssetCode`, `TransactionKind`, `SeatOutcome`, …
   [03](./03-data-model.md) §1 rule 1)
-- `backend/scripts/sync-contracts.ts` — copies the directory to `frontend/src/contracts/`, stamps
+- `backend/scripts/sync-contracts.mjs` — plain node, **not** `.ts`: the script runs from the
+  pre-commit hook, and `tsx` resolves through the platform-specific `node_modules/.bin`, so a
+  `.ts` script breaks any commit made from a different OS than the one that ran `npm install`.
+  Copies the directory to `frontend/src/contracts/`, stamps
   every file with `// AUTO-GENERATED FROM backend/src/contracts — DO NOT EDIT`, writes
   `contracts.hash` (SHA-256 of contents)
 - `contracts:sync` (backend) and `contracts:check` (both) npm scripts; check **exits non-zero** on
@@ -363,8 +366,10 @@ load-bearing unique constraints proven.
 **Needs:** S01
 
 **Build**
-- `prisma/schema.prisma` with `provider = env("DATABASE_PROVIDER")` ([02](./02-technical-prd.md)
-  §6.1)
+- `prisma/schema.prisma` with the datasource provider driven by `DATABASE_PROVIDER`
+  ([02](./02-technical-prd.md) §6.1). **Not** `provider = env(...)` — Prisma rejects that with
+  P1012; `scripts/prisma-provider.mjs` keeps the literal in step instead, and every `db:*` script
+  runs it first
 - Models from [03](./03-data-model.md) §3.1–3.2: `User`, `RefreshToken`, `GuestSession`, `Table`,
   `TableMember`, `Invite`
 - Every design rule from [03](./03-data-model.md) §1 obeyed: no `enum`, no scalar list, JSON as

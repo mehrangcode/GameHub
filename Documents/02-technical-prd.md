@@ -243,7 +243,7 @@ Template/
 │   │   ├── integration/
 │   │   └── fakes/              # InMemory*Repository
 │   └── scripts/
-│       └── sync-contracts.ts   # ★ see §4.1
+│       └── sync-contracts.mjs  # ★ see §4.1 (plain node — it runs from a git hook)
 ├── frontend/
 │   ├── public/
 │   │   └── assets/             # card backs, avatars, table felts
@@ -301,7 +301,7 @@ compiles on both sides.
    never runtime logic, never Node-only imports (no `crypto`, no `fs`).
 2. `frontend/src/contracts/` is a **generated mirror**, header-stamped
    `// AUTO-GENERATED FROM backend/src/contracts — DO NOT EDIT`.
-3. `backend/scripts/sync-contracts.ts` copies the directory and stamps a SHA-256 of its contents
+3. `backend/scripts/sync-contracts.mjs` copies the directory and stamps a SHA-256 of its contents
    into `contracts.hash`.
 4. Both projects get scripts:
    - `npm run contracts:sync` — backend only; copies and re-stamps.
@@ -531,10 +531,27 @@ The admin process extends this table with six codes (`STEP_UP_REQUIRED`, `MFA_RE
 ```prisma
 // backend/prisma/schema.prisma
 datasource db {
-  provider = env("DATABASE_PROVIDER")   // "sqlite" | "postgresql"
+  // Managed by backend/scripts/prisma-provider.mjs from DATABASE_PROVIDER.
+  provider = "sqlite"   // "sqlite" (dev/test) | "postgresql" (prod)
   url      = env("DATABASE_URL")
 }
 ```
+
+> **Corrected during S04 (2026-09-08).** This section originally specified
+> `provider = env("DATABASE_PROVIDER")`. **Prisma rejects that** —
+> *"A datasource must not use the env() function in the provider argument"*
+> (P1012). The provider must be a string literal.
+>
+> The intent survives without forking the schema: `DATABASE_PROVIDER` is still
+> the single switch, and `backend/scripts/prisma-provider.mjs` rewrites that one
+> line to match it. Every `db:*` npm script runs it first, so the schema always
+> matches the environment it is about to be applied to. One canonical schema, one
+> machine-managed line, and `tests/unit/schema-portability.test.ts` asserts the
+> literal is always one of the supported pair.
+>
+> The alternative — a SQLite copy and a Postgres copy of the schema — was
+> rejected: two files that would drift the first time a column is added under
+> time pressure.
 
 | Env | `DATABASE_PROVIDER` | `DATABASE_URL` |
 |---|---|---|

@@ -1,0 +1,836 @@
+// Board game platform — data model.
+// Source of truth: Documents/03-data-model.md §3.
+//
+// Design rules every model below obeys (03 §1, 02 §6.2). The schema must target
+// the SQLite ∩ PostgreSQL intersection, so:
+//   1. No `enum`      — String + a TS union in contracts/ + Zod.
+//   2. No scalar list — join table, or a JSON-encoded String.
+//   3. JSON is a String and is never queried into. Parse in app code.
+//   4. Int for chips, scores and every wallet amount — never Decimal/Float.
+//      The only Float in the whole schema is MatchParticipant.playedFraction.
+//   5. String @default(cuid()) ids. No @db.* native types.
+//   6. Soft delete via a nullable *At column, never a `deleted` boolean.
+//   7. Balances are never mutated without an appended ledger row.
+//
+// Two append-only logs are the backbone: GameEvent and WalletTransaction.
+// Neither is ever updated or deleted.
+//
+// The seven admin models (AdminCredential, AdminSession, AdminAuditLog,
+// GameFlag, PlatformFlag, ControlCommand, DailyMetric) arrive in S48 with the
+// admin entrypoint — 12-admin-console.md §4.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // Managed by scripts/prisma-provider.mjs from DATABASE_PROVIDER.
+  // Prisma rejects env() here (P1012), so the literal is kept in sync instead.
+  provider = "sqlite" // "sqlite" (dev/test) | "postgresql" (prod) — 02 §6.1
+  url      = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3.1 Identity
+// ═══════════════════════════════════════════════════════════════════════════
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  passwordHash    String // argon2id
+  displayName     String
+  avatarKind      String    @default("preset") // 'preset' | 'upload' | 'initials'
+  avatarRef       String?
+  locale          String    @default("en") // 'en' | 'fa'
+  role            String    @default("USER") // 'USER' | 'SUPPORT' | 'ADMIN'
+  status          String    @default("ACTIVE") // 'ACTIVE' | 'DISABLED' | 'BANNED'
+  statusReason    String?
+  statusChangedAt DateTime?
+  statusChangedBy String? // acting admin's User.id
+  emailVerified   Boolean   @default(false) // reserved; no email in v1
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  lastSeenAt      DateTime?
+
+  preferences    UserPreferences?
+  refreshTokens  RefreshToken[]
+  cosmetics      UserCosmetic[]
+  hostedTables   Table[]               @relation("TableHost")
+  memberships    TableMember[]
+  stats          PlayerStats[]
+  ratings        Rating[]
+  messages       ChatMessage[]
+  participations MatchParticipant[]
+  claimedGuests  GuestSession[]        @relation("ClaimedBy")
+  wallets        Wallet[]
+  purchases      Purchase[]
+  subscription   Subscription?
+  achievements   UserAchievement[]
+  tickets        MatchmakingTicket[]
+  cooldowns      MatchmakingCooldown[]
+  blocksMade     Block[]               @relation("Blocker")
+  blocksAgainst  Block[]               @relation("Blocked")
+  securityEvents SecurityEvent[]
+
+  @@index([lastSeenAt])
+  @@index([status])
+}
+
+model RefreshToken {
+  id           String    @id @default(cuid())
+  userId       String
+  tokenHash    String    @unique // sha256 of the token; never the raw value
+  familyId     String // rotation family — 03 §6.2
+  issuedAt     DateTime  @default(now())
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  replacedById String?
+  userAgent    String?
+  ip           String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([familyId])
+}
+
+/// The model that carries persona P2 — play with no account.
+model GuestSession {
+  id          String @id @default(cuid())
+  tokenHash   String @unique
+  displayName String
+
+  /// ★ A guest identity is bound to ONE table. It grants no access anywhere
+  /// else: a guest token that worked on any table would be a
+  /// privilege-escalation primitive (07 §3).
+  tableId String
+
+  avatarRef String?
+  /// Preferences chosen before signup, carried over on claim. JSON string.
+  prefsJson String?
+  locale    String    @default("en")
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  lastSeenAt DateTime?
+
+  /// Set when this guest becomes a real account. Kept for audit; never reused.
+  claimedAt       DateTime?
+  claimedByUserId String?
+
+  table          Table               @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  claimedBy      User?               @relation("ClaimedBy", fields: [claimedByUserId], references: [id])
+  memberships    TableMember[]
+  messages       ChatMessage[]
+  participations MatchParticipant[]
+  /// Provisional wallet — accrues while playing, vests on signup (10 §3.4).
+  wallets        Wallet[]
+  tickets        MatchmakingTicket[]
+
+  @@index([tableId])
+  @@index([expiresAt])
+  @@index([claimedByUserId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3.2 Tables, seats, invites
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Table {
+  id String @id @default(cuid())
+
+  /// Null for matchmade tables — there is no host.
+  hostUserId String?
+  gameSlug   String // matches GameEngine.meta.slug
+  status     String  @default("WAITING") // WAITING | IN_PROGRESS | FINISHED | CLOSED
+
+  /// How the table came to exist. Drives auto-start, avatar rules, reward eligibility.
+  origin   String  @default("PRIVATE") // PRIVATE | MATCHMADE
+  presetId String?
+
+  /// Set at formation by the farming guard. False → matches here earn nothing.
+  rewardEligible Boolean @default(true)
+
+  /// Validated against GameEngine.meta.optionsSchema. JSON string.
+  optionsJson     String
+  seatCount       Int
+  allowSpectators Boolean @default(true)
+  /// Host must approve each join (defence for a leaked link).
+  requireApproval Boolean @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  startedAt DateTime?
+  closedAt  DateTime?
+
+  host          User?          @relation("TableHost", fields: [hostUserId], references: [id])
+  members       TableMember[]
+  invites       Invite[]
+  games         GameInstance[]
+  messages      ChatMessage[]
+  guestSessions GuestSession[]
+
+  @@index([hostUserId, status])
+  @@index([status, updatedAt])
+  @@index([origin, gameSlug, status])
+}
+
+model TableMember {
+  id      String @id @default(cuid())
+  tableId String
+
+  /// Exactly one of userId / guestSessionId is set for humans; both null for a bot.
+  userId         String?
+  guestSessionId String?
+  isBot          Boolean @default(false)
+  botDifficulty  String? // 'easy' | 'medium' | 'hard'
+
+  /// 0-based seat index. Spectators have seat = null.
+  seat Int?
+  role String @default("PLAYER") // PLAYER | SPECTATOR
+  team Int? // partnership games (Shelem: seat % 2)
+
+  joinedAt DateTime  @default(now())
+  leftAt   DateTime?
+  /// Set on disconnect; the DISCONNECT grace timer is measured from here.
+  disconnectedAt DateTime?
+
+  // ─── Turn enforcement & ejection (04 §6) ───
+  /// Consecutive turn timeouts. Reset to 0 by any action when strikesResetOnAction.
+  timeoutStrikes Int       @default(0)
+  /// Set when the seat was taken over. Null while the human still holds it.
+  ejectedAt      DateTime?
+  ejectionReason String? // TURN_TIMEOUT | ABANDON | KICKED
+  /// Until when the human may `game:reclaimSeat`. Null = not reclaimable.
+  reclaimableUntil DateTime?
+  /// Whether a bot currently occupies this seat on the human's behalf.
+  botSubstituted   Boolean   @default(false)
+
+  table        Table         @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  user         User?         @relation(fields: [userId], references: [id])
+  guestSession GuestSession? @relation(fields: [guestSessionId], references: [id])
+
+  /// ★ THE seat race fix. Two friends clicking seat 2 → one gets a unique
+  /// violation. A read-then-write check in application code cannot do this.
+  @@unique([tableId, seat])
+  /// One identity cannot occupy two seats — the cheapest form of self-collusion
+  /// in a partnership game. NULLs stay distinct on both engines, so multiple
+  /// spectators, guests and bots coexist fine.
+  @@unique([tableId, userId])
+  @@unique([tableId, guestSessionId])
+  @@index([tableId, role])
+}
+
+model Invite {
+  id              String @id @default(cuid())
+  tableId         String
+  code            String @unique // short, URL-safe, ~8 chars
+  createdByUserId String
+
+  /// null = unlimited within seat capacity
+  maxUses   Int?
+  useCount  Int       @default(0)
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  table Table @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  @@index([tableId, revokedAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3.3 Game state — event sourced (P4)
+// ═══════════════════════════════════════════════════════════════════════════
+
+model GameInstance {
+  id       String @id @default(cuid())
+  tableId  String
+  gameSlug String
+  status   String @default("ACTIVE") // ACTIVE | FINISHED | ABANDONED
+
+  /// Deal seed. Committed as sha256(seed + id) before dealing, revealed after (03 §5).
+  rngSeed        String
+  seedCommit     String
+  seedRevealedAt DateTime?
+
+  /// Monotonic; every appended event increments it. Clients detect gaps with this.
+  seq Int @default(0)
+
+  /// Seat → occupant snapshot at start, so history survives later seat changes. JSON.
+  seatingJson String
+  optionsJson String
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+
+  table     Table          @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  events    GameEvent[]
+  snapshots GameSnapshot[]
+  result    MatchResult?
+
+  @@index([tableId, status])
+}
+
+model GameEvent {
+  id     String @id @default(cuid())
+  gameId String
+  /// Position in the log. (gameId, seq) is unique — this IS the ordering.
+  seq    Int
+  kind   String // MOVE | DEAL | PHASE | TIMEOUT | SYSTEM | AUDIT
+
+  /// Seat that caused it; null for system/dealer events.
+  seat Int?
+  /// Who acted, for re-attribution on guest claim.
+  actorUserId  String?
+  actorGuestId String?
+
+  /// Event body. JSON string. Shape depends on kind + game.
+  payloadJson String
+  /// Client-supplied idempotency key; blocks double-play on socket retry.
+  clientMoveId String?
+  createdAt    DateTime @default(now())
+
+  game GameInstance @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@unique([gameId, seq])
+  /// ★ Move idempotency, enforced by the database rather than by a cache that
+  /// a restart could lose (03 §4.4).
+  @@unique([gameId, clientMoveId])
+  @@index([gameId, kind])
+}
+
+model GameSnapshot {
+  id     String @id @default(cuid())
+  gameId String
+  /// State AFTER event `seq` was applied. A cache; the log is the truth.
+  seq       Int
+  stateJson String
+  createdAt DateTime @default(now())
+
+  game GameInstance @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@unique([gameId, seq])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3.4 Chat
+// ═══════════════════════════════════════════════════════════════════════════
+
+model ChatMessage {
+  id             String  @id @default(cuid())
+  tableId        String
+  userId         String?
+  guestSessionId String?
+  kind           String  @default("TEXT") // TEXT | EMOTE | SYSTEM
+
+  /// Text body, or emote id, or — for SYSTEM — an i18n key, never English
+  /// prose, so one row renders in every locale.
+  body       String
+  paramsJson String?
+
+  createdAt  DateTime  @default(now())
+  redactedAt DateTime?
+
+  table        Table         @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  user         User?         @relation(fields: [userId], references: [id])
+  guestSession GuestSession? @relation(fields: [guestSessionId], references: [id])
+
+  @@index([tableId, createdAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3.5 Results, stats, ratings
+// ═══════════════════════════════════════════════════════════════════════════
+
+model MatchResult {
+  id          String @id @default(cuid())
+  gameId      String @unique
+  gameSlug    String
+  reason      String // NORMAL | RESIGNATION | TIMEOUT | ABANDONED | DRAW
+  winningTeam Int?
+
+  /// Per-game summary: contract made, final score line, tricks, etc. JSON.
+  summaryJson String
+  durationMs  Int
+  finishedAt  DateTime @default(now())
+
+  game          GameInstance       @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  participants  MatchParticipant[]
+  ratingChanges RatingChange[]
+
+  @@index([gameSlug, finishedAt])
+}
+
+model MatchParticipant {
+  id             String  @id @default(cuid())
+  matchResultId  String
+  userId         String?
+  guestSessionId String?
+  isBot          Boolean @default(false)
+  seat           Int
+  team           Int?
+  rank           Int
+  score          Int
+
+  // ─── Outcome & reward (10 §5) ───
+  /// COMPLETED | EJECTED_TIMEOUT | EJECTED_ABANDON | RESIGNED
+  /// | REPLACED_RETURNED | BOT | KICKED
+  outcome String @default("COMPLETED")
+  /// Left before the end (for abandonment accounting). Derived from outcome.
+  forfeited Boolean @default(false)
+  /// Coins actually credited. 0 when forfeited or capped.
+  coinsAwarded Int @default(0)
+  /// True when a reward was earned by the team but zeroed for THIS seat.
+  rewardForfeited Boolean @default(false)
+  /// The ledger row that paid this seat, if any.
+  rewardTxId String?
+  /// Fraction of the match this human actually played. The only Float in the
+  /// schema — a ratio, never money.
+  playedFraction Float @default(1)
+
+  matchResult  MatchResult        @relation(fields: [matchResultId], references: [id], onDelete: Cascade)
+  user         User?              @relation(fields: [userId], references: [id])
+  guestSession GuestSession?      @relation(fields: [guestSessionId], references: [id])
+  rewardTx     WalletTransaction? @relation(fields: [rewardTxId], references: [id])
+
+  @@index([userId, matchResultId])
+  @@index([outcome])
+  @@index([rewardTxId])
+}
+
+model PlayerStats {
+  id       String @id @default(cuid())
+  userId   String
+  gameSlug String
+
+  played        Int @default(0)
+  won           Int @default(0)
+  lost          Int @default(0)
+  drawn         Int @default(0)
+  forfeited     Int @default(0)
+  currentStreak Int @default(0)
+  bestStreak    Int @default(0)
+  totalMs       Int @default(0)
+
+  /// Game-specific counters: tricks won, contracts made, best sudoku time. JSON.
+  extraJson String?
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, gameSlug])
+}
+
+model Rating {
+  id       String @id @default(cuid())
+  userId   String
+  gameSlug String
+  /// ELO-style. Start 1200, K decaying with games played.
+  rating   Int    @default(1200)
+  peak     Int    @default(1200)
+  games    Int    @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, gameSlug])
+  @@index([gameSlug, rating])
+}
+
+model RatingChange {
+  id            String   @id @default(cuid())
+  matchResultId String
+  userId        String
+  gameSlug      String
+  before        Int
+  after         Int
+  delta         Int
+  createdAt     DateTime @default(now())
+
+  matchResult MatchResult @relation(fields: [matchResultId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3.6 Cosmetics & preferences
+// ═══════════════════════════════════════════════════════════════════════════
+
+model CosmeticItem {
+  id       String @id // stable slug: 'back-persian-tile'
+  category String // CARD_BACK | AVATAR | AVATAR_FRAME | FELT | CARD_FACE | THEME | EMOTE_PACK | BADGE
+  nameKey  String // i18n key, not literal text
+  assetRef String
+
+  /// How it's obtained. PURCHASE items are priced via StoreItem.
+  unlockKind       String  @default("DEFAULT") // DEFAULT | PLAY_COUNT | WIN_COUNT | ACHIEVEMENT | PURCHASE | PREMIUM_GRANT
+  unlockParamsJson String?
+  gameSlug         String? // null = usable everywhere
+  sortOrder        Int     @default(0)
+  active           Boolean @default(true)
+
+  /// ★ Crypto seam (10 §8): a slot for a future token id. Unused in v1.
+  externalRef String?
+  /// ★ Crypto seam: transferability is the regulatory tripwire. Default false.
+  transferable Boolean @default(false)
+
+  unlocks    UserCosmetic[]
+  storeItems StoreItem[]
+
+  @@index([category, active])
+  @@index([unlockKind, active])
+}
+
+model UserCosmetic {
+  id         String   @id @default(cuid())
+  userId     String
+  cosmeticId String
+  unlockedAt DateTime @default(now())
+
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cosmetic CosmeticItem @relation(fields: [cosmeticId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, cosmeticId])
+  @@index([cosmeticId])
+}
+
+model UserPreferences {
+  userId        String @id
+  theme         String @default("system") // light | dark | system
+  locale        String @default("en")
+  numeralSystem String @default("auto") // auto | latin | persian
+
+  cardBackId String?
+  cardFaceId String?
+  feltId     String?
+
+  animationSpeed String  @default("normal") // off | fast | normal
+  soundEnabled   Boolean @default(true)
+  soundVolume    Int     @default(70)
+  /// Display only. The server always sends legalMoves; this never changes what
+  /// is enforced.
+  showLegalMoveHints Boolean @default(true)
+  reducedMotion      Boolean @default(false)
+
+  /// Room for new preferences without a migration. JSON.
+  extraJson String?
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3.7 Security audit
+// ═══════════════════════════════════════════════════════════════════════════
+
+model SecurityEvent {
+  id       String @id @default(cuid())
+  kind     String // ILLEGAL_MOVE | NOT_YOUR_TURN | BAD_TOKEN | SEAT_IMPERSONATION | RATE_LIMIT | INVITE_ABUSE
+  severity String @default("INFO") // INFO | WARN | ALERT
+
+  userId         String?
+  guestSessionId String?
+  tableId        String?
+  gameId         String?
+  ip             String?
+  userAgent      String?
+  detailsJson    String?
+  createdAt      DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([kind, createdAt])
+  @@index([userId, createdAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3.8 Matchmaking
+// The live queue lives in Redis (09 §3). These rows exist for metrics, abuse
+// analysis, and penalties that must outlive a restart.
+// ═══════════════════════════════════════════════════════════════════════════
+
+model MatchmakingTicket {
+  id             String  @id @default(cuid())
+  gameSlug       String
+  presetId       String
+  userId         String?
+  guestSessionId String?
+  partyId        String?
+  allowBotFill   Boolean @default(false)
+  ratingAtQueue  Int?
+  ip             String?
+
+  enqueuedAt DateTime  @default(now())
+  resolvedAt DateTime?
+  /// MATCHED | TIMEOUT | CANCELLED | DISCONNECTED | SERVER_RESTART | BLOCKED
+  outcome    String?
+  waitedMs   Int?
+  /// Set when outcome = MATCHED.
+  tableId    String?
+
+  user         User?         @relation(fields: [userId], references: [id])
+  guestSession GuestSession? @relation(fields: [guestSessionId], references: [id])
+
+  @@index([gameSlug, presetId, enqueuedAt])
+  @@index([outcome, resolvedAt])
+  @@index([ip, enqueuedAt])
+  @@index([userId])
+  @@index([guestSessionId])
+}
+
+/// Persisted, not Redis: a penalty that evaporates on deploy is not a penalty.
+model MatchmakingCooldown {
+  id             String @id @default(cuid())
+  userId         String?
+  guestSessionId String?
+  /// Ejections counted in the rolling window that produced this cooldown.
+  ejectionCount  Int
+  reason         String // TURN_TIMEOUT | ABANDON
+
+  startedAt DateTime @default(now())
+  endsAt    DateTime
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, endsAt])
+  @@index([guestSessionId, endsAt])
+}
+
+model Block {
+  id            String   @id @default(cuid())
+  blockerUserId String
+  blockedUserId String
+  createdAt     DateTime @default(now())
+
+  blocker User @relation("Blocker", fields: [blockerUserId], references: [id], onDelete: Cascade)
+  blocked User @relation("Blocked", fields: [blockedUserId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerUserId, blockedUserId])
+  @@index([blockedUserId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3.9 Wallet & ledger — the economy's core (10 §2)
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Wallet {
+  id String @id @default(cuid())
+  /// Exactly one of userId / guestSessionId is set.
+  userId         String?
+  guestSessionId String?
+  assetCode      String // COIN | GEM | TICKET
+
+  /// ★ CACHED. Truth is Σ transactions. Written only inside the transaction
+  /// that appends the corresponding WalletTransaction (E1).
+  balance Int @default(0)
+
+  /// VESTED (user, spendable) | PROVISIONAL (guest, accrues only)
+  status String @default("VESTED")
+
+  /// Lifetime totals, for caps and analytics. Never used as the balance.
+  lifetimeEarned Int @default(0)
+  lifetimeSpent  Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user         User?               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  guestSession GuestSession?       @relation(fields: [guestSessionId], references: [id], onDelete: Cascade)
+  transactions WalletTransaction[]
+
+  @@unique([userId, assetCode])
+  @@unique([guestSessionId, assetCode])
+  @@index([status])
+}
+
+model WalletTransaction {
+  id        String @id @default(cuid())
+  walletId  String
+  assetCode String
+
+  /// Signed. Positive = credit, negative = debit, 0 = CAP_REJECTED audit row.
+  amount Int
+
+  /// MATCH_REWARD | DAILY_BONUS | ACHIEVEMENT | PREMIUM_GRANT | PURCHASE
+  /// | REFUND | GUEST_VEST | GUEST_FORFEIT | ADMIN_ADJUST | CAP_REJECTED
+  kind String
+
+  /// ★ Derived, never random. UNIQUE per wallet — this IS idempotency (E2).
+  idempotencyKey String
+
+  /// Human/machine reason, especially for CAP_REJECTED and ADMIN_ADJUST.
+  reason String?
+
+  /// Related entity: matchResultId, storeItemId, subscriptionId, guestSessionId.
+  refKind String?
+  refId   String?
+
+  /// Balance immediately after this row, for statement rendering and audit.
+  balanceAfter Int
+  createdAt    DateTime @default(now())
+
+  wallet       Wallet             @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  purchase     Purchase?
+  participants MatchParticipant[]
+
+  /// ★ The constraint the whole economy rests on.
+  @@unique([walletId, idempotencyKey])
+  @@index([walletId, createdAt])
+  @@index([kind, createdAt])
+  @@index([refKind, refId])
+}
+
+/// Data, not code — rebalancing the economy is a row update, not a deploy.
+model RewardRule {
+  id        String  @id // 'shelem' | 'poker' | '_global'
+  gameSlug  String? // null for global caps
+  assetCode String  @default("COIN")
+
+  baseAmount Int @default(0)
+  /// rank → multiplier, keyed by seat count. JSON string.
+  placementJson String
+  /// Minimum plausible duration for a full reward (durationFactor). Milliseconds.
+  expectedMinMs Int @default(0)
+  /// Repeat-matchup decay curve. JSON array of multipliers.
+  repeatDecayJson String
+
+  capPerHour       Int @default(400)
+  capPerDay        Int @default(2000)
+  capPerDayGuest   Int @default(500)
+  capMatchesPerDay Int @default(30)
+  guestVestCap     Int @default(500)
+
+  active    Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3.10 Store, subscriptions, achievements
+// ═══════════════════════════════════════════════════════════════════════════
+
+model StoreItem {
+  id          String @id // 'store-back-persian-tile'
+  cosmeticId  String
+  assetCode   String @default("COIN")
+  priceAmount Int
+  category    String
+
+  /// Purchasable only by premium subscribers.
+  premiumOnly Boolean @default(false)
+  /// Consumable items expire; null = permanent.
+  durationDays Int?
+
+  availableFrom DateTime?
+  availableTo   DateTime?
+  sortOrder     Int       @default(0)
+  active        Boolean   @default(true)
+
+  cosmetic  CosmeticItem @relation(fields: [cosmeticId], references: [id])
+  purchases Purchase[]
+
+  @@index([category, active, sortOrder])
+  @@index([availableFrom, availableTo])
+  @@index([cosmeticId])
+}
+
+model Purchase {
+  id          String @id @default(cuid())
+  userId      String
+  storeItemId String
+  /// The debit row. One purchase, one transaction.
+  transactionId String @unique
+
+  pricePaid Int
+  assetCode String
+
+  expiresAt  DateTime?
+  refundedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storeItem   StoreItem         @relation(fields: [storeItemId], references: [id])
+  transaction WalletTransaction @relation(fields: [transactionId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([storeItemId])
+}
+
+model Subscription {
+  id     String @id @default(cuid())
+  userId String @unique
+  tier   String @default("PREMIUM")
+  /// ACTIVE | PAST_DUE | CANCELED | EXPIRED | TRIALING
+  status String
+
+  /// Provider identifiers. NO card data is ever stored here.
+  provider           String  @default("stripe")
+  providerCustomerId String?
+  providerSubId      String? @unique
+
+  interval           String    @default("month") // month | year
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  cancelAtPeriodEnd  Boolean   @default(false)
+  canceledAt         DateTime?
+  /// Grace window after a failed payment before perks lapse.
+  graceEndsAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user   User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events SubscriptionEvent[]
+
+  @@index([status, currentPeriodEnd])
+}
+
+model SubscriptionEvent {
+  id             String @id @default(cuid())
+  subscriptionId String
+  /// ★ Provider event id — UNIQUE, so a redelivered webhook is a no-op.
+  /// Providers guarantee at-least-once delivery; this is E2 applied to money.
+  providerEventId String @unique
+
+  kind        String // created | renewed | payment_failed | canceled
+  payloadJson String
+  createdAt   DateTime @default(now())
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId, createdAt])
+}
+
+model Achievement {
+  id       String  @id // 'first-shelem-win'
+  nameKey  String
+  descKey  String
+  gameSlug String?
+
+  /// Progress definition: { metric, target }. JSON string.
+  criteriaJson String
+  rewardAsset  String  @default("COIN")
+  rewardAmount Int     @default(0)
+  /// Optional cosmetic granted alongside the coins.
+  cosmeticId   String?
+
+  sortOrder Int     @default(0)
+  active    Boolean @default(true)
+
+  grants UserAchievement[]
+}
+
+model UserAchievement {
+  id            String @id @default(cuid())
+  userId        String
+  achievementId String
+
+  progress    Int       @default(0)
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+  @@index([achievementId])
+}
