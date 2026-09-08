@@ -40,11 +40,23 @@ private app, and it's a demanding one.
 | T18 | **AFK reward farming** | Join, idle, collect | Medium | Ejection ⇒ zero reward; escalating queue cooldown (§11.4) |
 | T19 | **Premium entitlement bypass** | Forged webhook; client-claimed premium | High | Signature-verified webhooks; entitlement always read server-side (§11.5) |
 | T20 | **Wallet ↔ chip bridging** | A future change wires poker stacks to the wallet | **Critical** | Lint rule + test. A *regression* threat, not an attacker threat (§11.6) |
+| T21 | **Stolen admin session** | Hijacked cookie, unattended laptop | **Critical** | TOTP at login, IP-pinned sessions, 30 min idle / 8 h absolute, step-up on every destructive route ([12](./12-admin-console.md) §3) |
+| T22 | **Admin mints coins** | Compromised or careless admin account | **Critical** | Mandatory reason, daily mint ceiling with alert, admin-minted share plotted on the supply chart, derived idempotency key ([12](./12-admin-console.md) §7.2) |
+| T23 | **Admin API exposed publicly** | Router mounted on `:3000` by mistake | **Critical** | Separate entrypoint, `:3100` unpublished, ESLint import ban, boot-time router assertion, permanent 404 test ([12](./12-admin-console.md) §2.4) |
+| T24 | **Audit-log tampering** | An admin erases their own trail | High | Append-only by construction; Postgres `REVOKE UPDATE, DELETE`; hash chain verified by `GET /audit/verify` ([12](./12-admin-console.md) §4) |
+| T25 | **Admin console leaks live hidden state** | A "debug this table" screen dumps engine state | **Critical** | Live tables render the **spectator projection**; raw event log gated on match completion. The §4 leak harness gains "admin viewer" as a subject ([12](./12-admin-console.md) A5) |
+| T26 | **Admin action used to grief** | Mass disable, punitive table closure | Medium | Per-action rate limits, no bulk destructive endpoints, disable reversible, **platform-initiated interruption never forfeits rewards** ([12](./12-admin-console.md) A8) |
+| T27 | **TOTP secret from a database dump** | Stolen backup | High | Secrets AES-256-GCM encrypted under an env-held key; recovery codes stored hashed ([12](./12-admin-console.md) §4) |
 
 > **The economy changed the threat landscape more than any other feature.** Before it, cheating
 > cost a friend a game. Now it has a payout, which means the adversary model shifts from "a
 > curious friend with devtools" to "someone with a financial reason to automate." §11 addresses
 > that class specifically.
+
+> **The admin console changed it a second time.** T1–T20 all assume an attacker with no server
+> access. An admin session *is* server access, in the shape of a web app — which is why T21–T27
+> are defended by process isolation and mandatory 2FA rather than by validation.
+> [12-admin-console.md](./12-admin-console.md) §9 carries the full detail.
 
 ---
 
@@ -322,11 +334,15 @@ catching honest players instead.
 ### v1 gaps, deliberately
 - No email ⇒ no password reset. Documented in [08-roadmap.md](./08-roadmap.md); mitigated by
   admin-assisted reset (you have DB access).
-- **2FA is now a real gap, not a shrug.** Once an account holds a coin balance, a premium
+- **2FA for *player* accounts is still a gap.** Once an account holds a coin balance, a premium
   subscription, and purchased cosmetics, it is worth stealing. Mitigated for now by httpOnly
   cookies, argon2id, refresh-family revocation, and no cash-out (a stolen account yields
   cosmetics, not money). **Revisit if coins ever become purchasable or transferable** — at that
   point 2FA stops being optional.
+- **2FA for *admin* accounts is no longer deferred.** An admin session can `ADMIN_ADJUST` the coin
+  supply, so TOTP is **mandatory** there, with step-up re-authentication for destructive actions
+  ([12](./12-admin-console.md) §3, §9.1). The asymmetry is deliberate, and it is the reason admin
+  identity is a separate session object rather than a role flag on a player session.
 - **CAPTCHA on signup is deferred but reconsidered.** With guest vesting, automated account
   creation has a payout for the first time. Rate limits plus the vesting cap hold at current
   scale; a CAPTCHA on `POST /auth/register` is the first lever to pull if signup automation
@@ -524,3 +540,4 @@ real-stakes gambling ([10](./10-economy-and-rewards.md) E5, §7). Guards:
 - [02-technical-prd.md](./02-technical-prd.md) — error taxonomy, testing strategy, P8–P10
 - [09-matchmaking.md](./09-matchmaking.md) — farming guards and queue cooldowns
 - [10-economy-and-rewards.md](./10-economy-and-rewards.md) — ledger invariants and regulatory boundaries
+- [12-admin-console.md](./12-admin-console.md) — T21–T27 in full, admin auth, the append-only audit log

@@ -87,7 +87,10 @@ type TransactionKind =
   | 'REFUND'              // + reversal of a PURCHASE
   | 'GUEST_VEST'          // + provisional balance vesting into a new account
   | 'GUEST_FORFEIT'       // − provisional balance expiring unvested
-  | 'ADMIN_ADJUST'        // ± manual correction (you); always reason-tagged
+  | 'ADMIN_ADJUST'        // ± manual correction (you); always reason-tagged.
+                          //   Issued only from the admin console: ADMIN role, step-up TOTP,
+                          //   mandatory reason, idempotency key derived as `admin:{auditLogId}`,
+                          //   and a daily platform mint ceiling — [12] §7.2
   | 'CAP_REJECTED'        // 0 audit row: a reward that was earned but capped away
 ```
 
@@ -653,7 +656,9 @@ questions answerable by pointing at a number.
 | 30 | Poker winner with 4 000 chips | Receives the 1st-place **coin** reward, not 4 000 coins |
 | 31 | All-guest matchmade group | `rewardEligible: false`; `CAP_REJECTED` rows for all |
 | 32 | Reward for a match that never finished | None |
-| 33 | Admin adjustment | `ADMIN_ADJUST` row with a reason; balance moves |
+| 33 | Admin adjustment | `ADMIN_ADJUST` row with a reason; balance moves; **one** row on retry (key `admin:{auditLogId}`) |
+| 34 | Admin adjustment past the daily mint ceiling | Refused; `SecurityEvent` raised; no ledger row ([12](./12-admin-console.md) §7.2) |
+| 35 | Table closed or seat kicked from the admin console | Rewards for completed hands stand; **no forfeiture** — unlike ejection ([12](./12-admin-console.md) A8) |
 | 34 | Refund | `REFUND` row reverses the purchase; cosmetic revoked |
 | 35 | Ledger after 100 k random ops | Σ transactions == Σ cached balances, per holder and asset |
 

@@ -157,12 +157,28 @@ Redis moved from "nice to have" to load-bearing once matchmaking and turn timers
 > The dividing line: **Redis is for things that are cheap to lose and expensive to compute.**
 > Anything a player would be upset to lose belongs in the database, in a transaction.
 
+The admin control channel (`admin:control`) obeys the same line: Redis carries a *notification
+containing a row id*, never the command's authority. The `ControlCommand` row is the truth, so
+turning a game off works with Redis down — see [12](./12-admin-console.md) §6.
+
+### 3.3 The admin process
+
+The same codebase boots a **second Node process** from `src/admin-main.ts` on `ADMIN_PORT`
+(default `3100`), mounting only `src/interface/admin/**`. It shares `domain/`, `application/`, and
+`infrastructure/` with the public API — one ledger implementation, one set of repositories — but is
+never published to the internet and never mounted on `:3000`.
+
+That isolation is structural, not conventional: an ESLint import ban, a boot-time router-stack
+assertion, and a permanent integration test. Full specification: [12](./12-admin-console.md) §2.
+
 ---
 
-## 4. Repository Layout — Two Separate Projects
+## 4. Repository Layout — Three Separate Projects
 
-Per your decision, `backend/` and `frontend/` are independent projects with independent
-`package.json`, lockfile, tsconfig, and CI.
+Per your decision, `backend/`, `frontend/`, and `admin-frontend/` are independent projects with
+independent `package.json`, lockfile, tsconfig, and CI. `admin-frontend/` talks only to the admin
+entrypoint of the *same* backend — it is a third **frontend**, not a second backend
+([12](./12-admin-console.md) §2.2 records why a fourth project was rejected).
 
 ```
 Template/
@@ -176,6 +192,7 @@ Template/
 │   │   ├── contracts/          # ★ CANONICAL socket + REST contracts (see §4.1)
 │   │   │   ├── events.ts
 │   │   │   ├── dto/
+│   │   │   ├── admin/          # ★ admin DTOs — mirrored to admin-frontend ([12] §8.2)
 │   │   │   └── index.ts
 │   │   ├── domain/             # NO imports from infrastructure/ or prisma
 │   │   │   ├── entities/
@@ -203,18 +220,24 @@ Template/
 │   │   │   ├── auth/           # jwt.ts, password.ts, guestToken.ts
 │   │   │   └── logger.ts
 │   │   ├── interface/
-│   │   │   ├── http/
+│   │   │   ├── http/           # public — MUST NOT import interface/admin/**
 │   │   │   │   ├── routes/
 │   │   │   │   ├── controllers/
 │   │   │   │   └── middleware/          # auth, error, rateLimit, requestId
-│   │   │   └── socket/
-│   │   │       ├── gateway.ts
-│   │   │       ├── handlers/
-│   │   │       └── middleware/
+│   │   │   ├── socket/
+│   │   │   │   ├── gateway.ts
+│   │   │   │   ├── handlers/
+│   │   │   │   └── middleware/
+│   │   │   └── admin/          # ★ mounted ONLY by admin-main.ts ([12] §2.4)
+│   │   │       ├── routes/
+│   │   │       ├── controllers/
+│   │   │       └── middleware/          # adminAuth, requireRole, requireStepUp, auditContext
 │   │   ├── config/             # env.ts (Zod-validated), constants.ts
 │   │   ├── container.ts        # dependency wiring (see §5.4)
-│   │   ├── app.ts
-│   │   └── server.ts
+│   │   ├── app.ts              # public Express app
+│   │   ├── admin-app.ts        # ★ admin Express app
+│   │   ├── main.ts             # public entrypoint  :3000
+│   │   └── admin-main.ts       # ★ admin entrypoint :3100, unpublished
 │   ├── tests/
 │   │   ├── unit/               # engines — the bulk of the suite
 │   │   ├── integration/
@@ -246,10 +269,24 @@ Template/
 │   │   └── main.tsx
 │   ├── tests/
 │   └── e2e/                    # Playwright
+├── admin-frontend/             # ★ third project — English/LTR only, no theming, no game code
+│   ├── src/
+│   │   ├── contracts/          # ★ MIRROR of backend/src/contracts/admin — generated
+│   │   ├── api/                # axios, ADMIN base, withCredentials
+│   │   ├── stream/             # EventSource (SSE) manager
+│   │   ├── stores/             # adminAuth, users, ledger, games, tables, metrics, audit
+│   │   ├── routes/
+│   │   ├── features/           # auth, dashboard, users, economy, platform, audit
+│   │   ├── components/         # DataTable (cursor-only), ReasonDialog, ConfirmDestructive
+│   │   └── main.tsx
+│   ├── tests/
+│   └── e2e/                    # Playwright
 ├── docker-compose.yml
 ├── docker-compose.prod.yml
 └── .env.example
 ```
+
+Full admin-frontend specification: [12-admin-console.md](./12-admin-console.md) §8.
 
 ### 4.1 The Contract Drift Problem (and its fix)
 
@@ -269,8 +306,11 @@ compiles on both sides.
 4. Both projects get scripts:
    - `npm run contracts:sync` — backend only; copies and re-stamps.
    - `npm run contracts:check` — recomputes the hash and **exits non-zero on mismatch**.
-5. `contracts:check` runs in CI for both projects and in a `pre-commit` hook. A drifted contract
-   fails the build rather than shipping.
+5. `contracts:check` runs in CI for **all three** projects and in a `pre-commit` hook. A drifted
+   contract fails the build rather than shipping.
+
+`backend/src/contracts/admin/` mirrors to `admin-frontend/src/contracts/` by the same mechanism
+and the same script — one more destination, not a second mechanism.
 
 > **Note:** if this friction becomes annoying, the escape hatch is publishing
 > `backend/src/contracts` as a private npm package (or a git submodule) consumed by both. The
@@ -306,6 +346,10 @@ Enforced mechanically, not by discipline, via ESLint `no-restricted-imports`:
 ```
 …scoped by `overrides` to `src/domain/**` and `src/application/**`. The single most valuable
 lint rule in the project: it is what keeps game rules testable without a database.
+
+A third `overrides` block scoped to `src/app.ts`, `src/main.ts`, `src/interface/http/**`, and
+`src/interface/socket/**` bans `**/interface/admin/**`. That is what keeps the admin surface off
+the public port — one of the three guards in [12](./12-admin-console.md) §2.4.
 
 ### 5.2 Repository Interfaces (domain layer)
 
@@ -474,6 +518,10 @@ A single Express error middleware and a single socket ack wrapper map `AppError 
 Anything that is *not* an `AppError` is logged at `error` with a request id and returned as an
 opaque `INTERNAL` — never a stack trace to the client.
 
+The admin process extends this table with six codes (`STEP_UP_REQUIRED`, `MFA_REQUIRED`,
+`MFA_ENROLLMENT_REQUIRED`, `ADMIN_LOCKED`, `REASON_REQUIRED`, `SELF_TARGET_FORBIDDEN`) —
+[12](./12-admin-console.md) §5.1. Same `AppError` base, same middleware.
+
 ---
 
 ## 6. Database Strategy — SQLite → PostgreSQL
@@ -535,8 +583,13 @@ This costs a little expressiveness and buys a genuinely portable schema. Full sc
 
 ## 7. REST API Surface
 
-All routes under `/api/v1`. `Auth` column: **P**ublic · **G**uest-or-user · **U**ser ·
-**H**ost-of-table · **A**dmin(you).
+All routes under `/api/v1`, served on `:3000`. `Auth` column: **P**ublic · **G**uest-or-user ·
+**U**ser · **H**ost-of-table.
+
+> **There are no admin routes on this port.** The admin surface lives under `/admin/api/v1` on the
+> separate, unpublished `:3100` process — catalogued in [12](./12-admin-console.md) §5. A request
+> for `/admin/*` here returns **404**, asserted by a permanent integration test
+> ([12](./12-admin-console.md) §2.4).
 
 ### Auth & identity
 
@@ -662,29 +715,45 @@ Both locales ship in v1: **English (LTR)** and **Persian / فارسی (RTL)**.
 
 ```bash
 # terminal 1
-cd backend  && npm run dev          # tsx watch, SQLite, in-memory socket adapter
+cd backend  && npm run dev          # tsx watch, SQLite, in-memory socket adapter    :3000
 # terminal 2
-cd frontend && npm run dev          # vite, proxies /api and /socket.io to :3000
+cd frontend && npm run dev          # vite, proxies /api and /socket.io to :3000     :5173
+# terminal 3 — admin backend (from M0's skeleton onward)
+cd backend  && npm run dev:admin    # tsx watch, admin routers only, 127.0.0.1       :3100
+# terminal 4 — admin frontend (from MA)
+cd admin-frontend && npm run dev    # vite, proxies /admin/api to :3100              :5273
 ```
-Redis optional locally; `REDIS_URL` unset → in-memory adapter + in-process rate limiter.
+Redis optional locally; `REDIS_URL` unset → in-memory adapter + in-process rate limiter, and
+`CONTROL_TRANSPORT=poll` so admin control commands still land via the outbox sweep
+([12](./12-admin-console.md) §6.3).
 
 ### 9.2 Prod — Docker Compose on a VPS
 
 ```mermaid
 graph LR
     Net(("Internet")) --> CAD["Caddy<br/>TLS, reverse proxy"]
-    CAD -->|"/"| WEB["web<br/>nginx serving Vite build"]
-    CAD -->|"/api, /socket.io"| API["api<br/>Node 22"]
+    CAD -->|"app.example.com /"| WEB["web<br/>nginx serving Vite build"]
+    CAD -->|"app.example.com /api, /socket.io"| API["api<br/>Node 22  :3000"]
+    CAD -->|"admin.example.com /"| AWEB["admin-web<br/>nginx serving admin build"]
+    CAD -->|"admin.example.com /admin/api"| AAPI["admin-api<br/>Node 22  :3100<br/>NOT published"]
     API --> PG[("postgres:16")]
+    AAPI --> PG
     API --> RDS[("redis:7")]
+    AAPI --> RDS
     MIG["migrate (one-shot)"] -.->|"runs before api"| PG
     PG --> BK["nightly pg_dump<br/>→ volume"]
 ```
 
-Services: `caddy` (auto-TLS via Let's Encrypt), `web`, `api`, `postgres`, `redis`,
-`migrate` (one-shot, `depends_on: postgres: service_healthy`).
+Services: `caddy` (auto-TLS via Let's Encrypt), `web`, `api`, **`admin-web`**, **`admin-api`**,
+`postgres`, `redis`, `migrate` (one-shot, `depends_on: postgres: service_healthy`).
 
 Notes that matter:
+- **`admin-api` has no `ports:` entry.** It is reachable only over the Docker network, only from
+  Caddy, only on the admin hostname — optionally behind `ADMIN_IP_ALLOWLIST`. `docker ps` showing
+  a published `:3100` is a deployment bug ([12](./12-admin-console.md) §2.1).
+- **SSE needs `flush_interval -1`** in the `admin.example.com` reverse-proxy block, or the live
+  feed buffers and looks broken.
+- `api` and `admin-api` run the **same image** with a different command — one build, two processes.
 - **WebSocket proxying:** Caddy handles `Upgrade` transparently; no special config beyond
   `reverse_proxy api:3000`. (Called out because this is the #1 first-deploy failure for
   socket apps behind a proxy.)
@@ -700,8 +769,10 @@ Notes that matter:
 
 ### 9.3 CI (GitHub Actions)
 
-Two workflows, one per project, each: install → `contracts:check` → typecheck → lint → test →
-build. Frontend additionally runs Playwright against a compose-spun-up stack on PRs to `main`.
+Three workflows, one per project, each: install → `contracts:check` → typecheck → lint → test →
+build. Frontend additionally runs Playwright against a compose-spun-up stack on PRs to `main`;
+admin-frontend runs its own smaller Playwright suite (login + MFA, disable a user, adjust a
+wallet).
 
 ---
 
@@ -717,6 +788,7 @@ build. Frontend additionally runs Playwright against a compose-spun-up stack on 
 | **Economy** | Vitest | Ledger invariants: idempotent credits, balance == Σ transactions, row-locked debits, **ejected-winner earns zero while their partner earns full**, caps, guest vesting inside the claim transaction | 100% of ledger paths |
 | **Matchmaking** | Vitest + fake Redis | Match formation, **timeout release**, bot fill, party atomicity, expiry-before-match ordering, farming guards, cooldowns | all documented cases |
 | **Turn enforcement** | Vitest | Strike escalation, warning emission, ejection, bot substitution, reclaim window, per-game default actions | all games |
+| **Admin** | Vitest + Supertest | **Public-port isolation** (`:3000/admin/*` → 404), audit-completeness over the route manifest, RBAC matrix, step-up expiry, TOTP replay, reason enforcement, **admin live-table leak test**, control-command durability and idempotency, audit-chain verification | [12](./12-admin-console.md) §10 — all 15 |
 | E2E | Playwright | invite → guest join → play → signup nudge → claim → land back at table with seat intact **and coins vested**; queue → timeout → release → play with bots; go idle → warned → ejected → zero reward | the 5 headline journeys |
 
 **Determinism:** every engine takes an injected RNG. Tests inject a seeded generator, so any
@@ -734,8 +806,13 @@ bug reported as "this Shelem hand scored wrong" is reproducible from `(seed, mov
   move, invalid token, rate-limit trip, and seat-impersonation attempt. This is how you'd
   actually catch a friend poking at the API.
 - `/health` (liveness) and `/ready` (DB + Redis reachable) endpoints for compose healthchecks.
-- Lightweight in-process metrics counters exposed on `/metrics` (games started/finished,
-  illegal moves, active sockets, reconnects) — enough to spot trouble without running Prometheus.
+- Lightweight in-process metrics counters (games started/finished, illegal moves, active sockets,
+  reconnects) — enough to spot trouble without running Prometheus. They are **read through the
+  admin process**, not from a `/metrics` route on the public port
+  ([12](./12-admin-console.md) §5, §7.4).
+- **`AdminAuditLog`** is the second audit trail, and it covers the operator rather than the
+  players: append-only, hash-chained, written in the same transaction as the action it records
+  ([12](./12-admin-console.md) §3.5).
 
 ---
 
@@ -762,7 +839,8 @@ bug reported as "this Shelem hand scored wrong" is reproducible from `(seed, mov
 | [05-game-engine-spec.md](./05-game-engine-spec.md) | The `GameEngine` interface every game implements |
 | [06-frontend-architecture.md](./06-frontend-architecture.md) | Vite/React/Zustand/Axios, theming, customization page |
 | [07-security-and-anticheat.md](./07-security-and-anticheat.md) | Threat model and defenses |
-| [08-roadmap.md](./08-roadmap.md) | Milestones M0–M8 with exit criteria |
+| [08-roadmap.md](./08-roadmap.md) | Milestones M0–M8 + MA with exit criteria |
 | [09-matchmaking.md](./09-matchmaking.md) | Queue, presets, timeout, farming guards |
 | [10-economy-and-rewards.md](./10-economy-and-rewards.md) | Wallet, ledger, rewards, store, premium |
+| [12-admin-console.md](./12-admin-console.md) | The admin entrypoint, `admin-frontend/`, moderation, economy oversight, game on/off, reports, audit |
 | [games/](./games/) | Per-game implementation specs |

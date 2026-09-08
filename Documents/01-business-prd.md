@@ -125,6 +125,14 @@ Runs it on a VPS. Wants: cheap, boring, restartable, backed up, debuggable at 1a
 **Needs:** structured logs, an audit trail when someone claims a hand scored wrong, replayable
 matches from `(seed, moves)`, and a restore procedure that has actually been tested.
 
+**This persona is the one the product under-served the longest.** Once matchmaking put strangers at
+the same table and coins acquired value, "debuggable at 1am" stopped meaning `psql` and started
+meaning *find this user, see where their coins went, disable them, turn the broken game off*. That
+is a second application, and it is specified in
+[12-admin-console.md](./12-admin-console.md) — deliberately **not** a page inside the player app,
+because an admin session that can adjust the coin supply must not share an origin, a cookie, or a
+network position with the game.
+
 ---
 
 ## 5. The Headline Journeys
@@ -344,6 +352,7 @@ momentum never stalls).
 | **AI bots** | Fill a seat at table creation, on matchmaking bot-fill, and on ejection. **Per-game work** — each engine needs its own strategy | Per game, from M2 |
 | **Stats, ELO & match history** | Per-game W/L, streaks, ELO, replayable history from the event log | M8 (event log exists from M0) |
 | **Customization page** ⭐ | Card backs, avatars (preset + upload), felts, light/dark, card faces (classic / Persian), animation speed, sound. Server-persisted; `localStorage` for guests | M8, token architecture in M0, purchasing in M7 |
+| **Admin console** ⭐ | A **second application** for P5: user search and moderation, ledger oversight and reconciliation, game on/off without a deploy, live table control, reports. Own process on an unpublished port, own credentials with mandatory TOTP, append-only audit log ([12](./12-admin-console.md)) | Spine in **M0**, ledger view M2, game flags M3, the console at **MA** (between M7 and M8) |
 
 > **Bots are now load-bearing, not a nicety.** They were originally "fill an empty seat if you're
 > short a player". Three separate systems now depend on them: matchmaking bot-fill, ejection
@@ -446,5 +455,5 @@ crypto / NFT assets *(a separate product decision, not a feature — [10](./10-e
 | [10-economy-and-rewards.md](./10-economy-and-rewards.md) | Wallet, rewards, forfeiture, store, premium — G10 and G11 |
 | [05-game-engine-spec.md](./05-game-engine-spec.md) | The abstraction behind G5 |
 | [07-security-and-anticheat.md](./07-security-and-anticheat.md) | How G2 is achieved |
-| [08-roadmap.md](./08-roadmap.md) | Milestones M0–M8 |
+| [08-roadmap.md](./08-roadmap.md) | Milestones M0–M8 + MA |
 | [games/](./games/) | Per-game rules and specifications |

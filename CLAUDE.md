@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Repository State
 
 **There is no code yet.** This repository currently contains only `Documents/` — a complete,
-cross-referenced PRD set for a board/card game platform (Express + React). The first
-implementation step is **M0** in `Documents/08-roadmap.md`.
+cross-referenced PRD set for a board/card game platform (Express + React) **plus its admin
+console**. The first implementation step is **M0** in `Documents/08-roadmap.md`.
 
 `Documents/README.md` is the entry point: it holds the document index, the **Decisions Already
 Locked** table, a requirement→document coverage map, and the **Status** table of open questions.
@@ -27,7 +27,10 @@ with it, the other document is wrong and should be corrected — do not "average
 | `Documents/05-game-engine-spec.md` | `GameEngine` interface, invariants I1–I5, shared card/trick/betting modules, RNG, **§7 per-game checklist** | Before implementing any game |
 | `Documents/06-frontend-architecture.md` | Vite/React setup, routes + guards, Zustand slices, Axios interceptors, socket discipline, theming tokens, `/customize` | Client work |
 | `Documents/07-security-and-anticheat.md` | Threat model, hidden-info defense, move integrity, provable shuffle, guest-token binding, §11 economy integrity, accepted risks | Auth, projections, anything tamperable |
-| `Documents/08-roadmap.md` | Milestones M0–M8 with scope + exit criteria, backlog order, cross-milestone Definition of Done | Start of every work session |
+| `Documents/08-roadmap.md` | Milestones M0–M8 + MA (admin console) with scope + exit criteria, backlog order, cross-milestone Definition of Done | Start of every work session |
+| `Documents/11-build-plan.md` | **Session layer under the roadmap** — M0 as 50 numbered 2–3 h sessions (goal, build, tests, *You verify* steps, done-when); M1–M8 and MA outlined. §0 has the daily protocol | Start of every work session, with the cursor below |
+| `Documents/12-admin-console.md` | **The second application** — admin entrypoint on an unpublished `:3100`, `admin-frontend/`, moderation, ledger oversight, game on/off, reports, TOTP + append-only audit log. §11 is the delivery split | Anything admin-facing |
+| `.claude/context/build/{plan.md,context.md}` | The live cursor: last session, next session, decisions, blockers, inherited open questions | **Read `context.md` first, before anything else** |
 | `Documents/09-matchmaking.md` | Queue pools, presets, 120 s timeout release, bot fill, parties, backfill, farming guards, cooldowns | Matchmaking work |
 | `Documents/10-economy-and-rewards.md` | Wallet + append-only ledger, reward formula, forfeiture on ejection, guest vesting, store, sinks, premium, legal boundaries | Anything involving coins |
 | `Documents/games/*.md` | Per-game rule specs: `sudoku` (M1), `blackjack` (M2), `shelem` (M4, ⭐ flagship), `poker-holdem` (M5), `chess` (M6), `backlog-games` (later) | Implementing that game |
@@ -37,7 +40,7 @@ Conventions inside the docs: Mermaid diagrams, relative links only,
 them), `[C##]` markers in `shelem.md` tying rules to its §0 sourcing table. Code samples in the
 docs are **illustrative shape and intent**, not final code.
 
-## Commands (once `backend/` and `frontend/` exist)
+## Commands (once `backend/`, `frontend/`, and `admin-frontend/` exist)
 
 ```bash
 # backend — first run
@@ -45,33 +48,48 @@ cd backend && npm install && npx prisma db push && npm run seed && npm run dev  
 
 # frontend — separate terminal
 cd frontend && npm install && npm run dev    # vite :5173, proxies /api and /socket.io to :3000
+
+# admin backend (from S48) — same codebase, second entrypoint, never published
+cd backend && npm run dev:admin              # tsx watch, admin routers only, :3100
+
+# admin frontend (from MA) — separate terminal
+cd admin-frontend && npm install && npm run dev   # vite :5273, proxies /admin/api to :3100
 ```
 
-Two **independent** projects: separate `package.json`, lockfile, tsconfig, and CI pipeline each.
-There is no root workspace, no monorepo tooling. Redis is optional in dev (`REDIS_URL` unset →
-in-memory socket adapter + in-process rate limiter).
+Three **independent** projects — `backend/`, `frontend/`, `admin-frontend/` — with separate
+`package.json`, lockfile, tsconfig, and CI pipeline each. There is no root workspace, no monorepo
+tooling. `admin-frontend/` talks only to `backend`'s admin entrypoint; it is a third *frontend*, not
+a second backend. Redis is optional in dev (`REDIS_URL` unset → in-memory socket adapter +
+in-process rate limiter + `CONTROL_TRANSPORT=poll` for the admin control outbox).
 
-Contract sync between the two projects (see §4.1 of the technical PRD):
+Contract sync (see §4.1 of the technical PRD) — one script, two destinations:
 
 ```bash
-cd backend && npm run contracts:sync     # copy backend/src/contracts → frontend/src/contracts, re-stamp SHA-256
-npm run contracts:check                  # both projects; exits non-zero on drift. Runs in CI + pre-commit
+cd backend && npm run contracts:sync     # backend/src/contracts → frontend/src/contracts
+                                         # backend/src/contracts/admin → admin-frontend/src/contracts
+npm run contracts:check                  # every project; exits non-zero on drift. Runs in CI + pre-commit
 ```
 
-Tests use **Vitest** on both sides (`npx vitest run path/to/file.test.ts` for a single file,
-`-t "name"` for a single test). Backend integration adds Supertest + `socket.io-client`; frontend
-E2E is Playwright in `frontend/e2e/`.
+Tests use **Vitest** everywhere (`npx vitest run path/to/file.test.ts` for a single file,
+`-t "name"` for a single test). Backend integration adds Supertest + `socket.io-client`; E2E is
+Playwright in `frontend/e2e/` and `admin-frontend/e2e/`.
 
 ## Architecture
 
 ### Layers (backend) — dependencies point inward only
 
 ```
-interface/ (Express routers, Socket.IO gateway)
-   → application/ (services: Auth, Table, GameSession, Reward, Matchmaking, Store, …)
+interface/ (Express routers, Socket.IO gateway, admin routers)
+   → application/ (services: Auth, Table, GameSession, Reward, Matchmaking, Store, admin/*, …)
       → domain/ (game engines, registry, entities, value objects, repository *interfaces*)
 infrastructure/ (Prisma repos, UnitOfWork, Redis, auth primitives) --implements--> domain interfaces
 ```
+
+**Two entrypoints, one codebase.** `main.ts` serves the public API on `:3000`; `admin-main.ts`
+serves `/admin/api/v1` on `:3100`, mounting only `interface/admin/**`, bound internally and never
+published. Same `container.ts`, same repositories, same ledger — so the money rules cannot fork.
+Isolation is enforced three ways: an ESLint import ban, a boot-time router-stack assertion, and a
+permanent test that `:3000/admin/*` is 404 (`12-admin-console.md` §2.4).
 
 `domain/` and `application/` must not import `infrastructure/**` or `@prisma/client`. This is
 enforced by ESLint `no-restricted-imports`, not by discipline — it is what keeps game rules
@@ -160,14 +178,32 @@ the entire cosmetics/theming system is runtime variable swaps.
   idempotency keys. Redis is for things cheap to lose and expensive to compute.
 - **Errors return `i18nKey` + `details`, never a rendered English sentence.** All errors extend
   `AppError` with a stable machine `code`; anything else becomes an opaque `INTERNAL`.
+- **No admin route on the public port, ever.** `interface/admin/**` is mounted by `admin-main.ts`
+  alone. If you catch yourself adding a role check to a route on `:3000`, you are building the bug
+  the isolation guards exist to prevent.
+- **No admin mutation without an audit row in the same transaction.** Every mutating admin service
+  call goes through `withAudit(...)`. If the audit write fails, the action fails — same discipline
+  as the wallet ledger. `AdminAuditLog` is append-only and hash-chained: no update path, no delete
+  path, no exceptions, including for you.
+- **The admin console never sees live hidden information.** A live table renders the *spectator*
+  projection; the raw event log unlocks only once `MatchResult` exists. A "dump the engine state"
+  debug screen is a live view of everyone's cards behind one stolen cookie.
+- **Platform-initiated interruption is free.** A console-closed table or an admin kick records a
+  neutral `SeatOutcome` and forfeits nothing — unlike ejection. Forfeiture punishes idling, not
+  operations.
+- **Destructive admin actions require fresh TOTP and a written reason.** `reason` is a column and a
+  `REASON_REQUIRED` error, not a UI placeholder.
 
 ## Testing Priorities
 
 The highest-ROI tests, in order: (1) **game engine unit tests** — ≥90% branch coverage on
 `domain/games/**`, full-hand replays from fixtures; (2) the **leak-test suite** asserting a
-projected payload for seat A contains no trace of seat B's hidden cards, per game, for every seat
-and for spectators; (3) **ledger invariants** including the ejected-winner-earns-zero case;
-(4) **turn enforcement** — strike ladder, ejection, bot substitution, reclaim.
+projected payload for seat A contains no trace of seat B's hidden cards, per game, for every seat,
+for spectators, **and for the admin viewer**; (3) **ledger invariants** including the
+ejected-winner-earns-zero case; (4) **turn enforcement** — strike ladder, ejection, bot
+substitution, reclaim; (5) **admin isolation and audit completeness** — `:3000/admin/*` is 404, and
+a manifest-driven test that fails when any mutating admin route forgets its audit row
+(`12-admin-console.md` §10).
 
 Every engine takes an injected RNG, so any bug reduces to `(seed, moves[])`. The
 `replayFixture(seed, moves)` helper is part of the test kit from M0 and must produce

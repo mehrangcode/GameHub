@@ -37,8 +37,10 @@ gantt
     M6 Chess                 :m6, after m5, 18d
     section Commerce
     M7 Store and Premium     :m7, after m6, 28d
+    section Operations
+    MA Admin Console         :ma, after m7, 21d
     section Polish
-    M8 Social and Stats      :m8, after m7, 28d
+    M8 Social and Stats      :m8, after ma, 28d
     section Later
     Backlog games            :bk, after m8, 60d
 ```
@@ -53,6 +55,7 @@ gantt
 | **M5** | Poker | ~4 wk | Multi-street betting, **side pots**, hand evaluator |
 | **M6** | Chess | ~2.5 wk | Non-card board layer, real clocks, `chess.js` adapter |
 | **M7** | **Store & Premium** ⭐ | ~4 wk | Coin spending, sinks, subscription, entitlements |
+| **MA** | **Admin Console** | ~3 wk | `admin-frontend/`, moderation, ledger oversight, game on/off, reports, audit browser ([12](./12-admin-console.md) §11.2) |
 | **M8** | Social & stats | ~4 wk | Spectators, emotes, ELO, stats, **customization page**, Persian completion |
 | **Later** | Backlog games | — | Hokm → Checkers → Crazy Eights → Uno → Rummy → Durak → Backgammon |
 
@@ -65,6 +68,8 @@ gantt
 | **Matchmaking at M3, not M0** | A queue needs games to queue for and bots to fill with. With only Sudoku it would be pointless; after Blackjack there are two real presets and a working bot |
 | **Matchmaking before Shelem** | Shelem is the game most likely to need matchmaking (four players is hard to assemble) and the one whose 45-minute matches most need the ejection ladder proven first |
 | **Premium after all five games** | Nobody subscribes to an incomplete catalog, and the perk list isn't credible until the cosmetics exist |
+| **Admin spine in M0, admin UI at MA** | The audit-in-transaction rule and the public-port isolation must exist *before* the first admin write — retrofitting them across twenty endpoints is a rewrite. The *UI* can wait until there is a store, a subscription, and months of ledger to look at ([12](./12-admin-console.md) §11) |
+| **MA is a letter, not M9** | Inserting it between M7 and M8 without renumbering keeps every existing cross-reference in [11](./11-build-plan.md) and the game specs valid |
 
 ---
 
@@ -77,7 +82,7 @@ seeing seats fill live — before any game exists.
 
 | Area | Work |
 |---|---|
-| Repos | `backend/` + `frontend/` scaffolds, TS strict, ESLint (incl. the layer-boundary and `Math.random` rules), Prettier, Vitest, `contracts:sync` / `contracts:check` |
+| Repos | `backend/` + `frontend/` scaffolds, TS strict, ESLint (incl. the layer-boundary, `Math.random`, and **admin-import** rules), Prettier, Vitest, `contracts:sync` / `contracts:check` |
 | Database | Full Prisma schema from [03-data-model.md](./03-data-model.md); dev `db push`; seed script |
 | Backend layers | `domain/` → `application/` → `infrastructure/` → `interface/`; `IRepository` + all interfaces; Prisma implementations; `UnitOfWork`; `container.ts` |
 | Auth | Register, login, refresh rotation with family revocation, logout, `/auth/me`; argon2id; **guest token issue** + **guest claim transaction** |
@@ -89,6 +94,7 @@ seeing seats fill live — before any game exists.
 | Frontend | Vite setup, routes, `authStore`/`socketStore`/`tableStore`/`themeStore`, Axios single-flight refresh, socket manager |
 | Screens | Welcome (registry-driven preview cards, all "Coming soon"), invite landing, table shell with seats + chat, login/register |
 | i18n | `react-i18next` wired, `en` + `fa` for `common`/`auth`/`table`/`errors`, `dir` switching, logical-CSS stylelint rule, `tokens.css` |
+| **Admin spine** | `admin-main.ts` on an unpublished `:3100` + the three isolation guards; admin sessions with **TOTP and forced enrollment**; the `withAudit` transaction wrapper and append-only `AdminAuditLog`; read-only `GET /users`, `/audit`, `/security-events`. **No UI** — verified via `backend/requests/admin.http` ([12](./12-admin-console.md) §11.1) |
 | Ops | Dockerfiles, `docker-compose.yml` (dev), `docker-compose.prod.yml`, Caddy config, `/health` + `/ready`, Pino with redaction, CI for both projects |
 
 ### Exit criteria
@@ -107,6 +113,8 @@ seeing seats fill live — before any game exists.
 - [ ] Welcome page renders cards from `GET /api/v1/games`
 - [ ] Every screen reviewed in `fa`/RTL — no clipped or mirrored-wrongly layout
 - [ ] `contracts:check` green in both CI pipelines
+- [ ] **`GET :3000/admin/api/v1/users` returns 404; the same path on `:3100` returns 401**
+- [ ] **The seeded admin can do nothing until TOTP is enrolled**, and every admin read is audited
 - [ ] Deployed to the VPS over HTTPS, with the **restore-from-backup procedure actually tested once**
 
 > **Why the guest-claim journey is an M0 exit criterion rather than a later feature:** it is the
@@ -157,6 +165,8 @@ of the rules complexity.
 - First bot (`BotStrategy`) — basic-strategy table, which is genuinely good at blackjack
 - Card components: `Card`, `CardBack`, `Hand`, `CardStack`; deal/flip animations
 - Turn timers + auto-stand on expiry
+- **Admin (+1 session):** ledger browser API (cursor-paginated), wallet detail with cached-vs-derived
+  comparison, reconciliation endpoint + nightly job ([12](./12-admin-console.md) §7.2)
 
 ### Exit criteria
 - [ ] **Hole card absent from all projections until reveal** (leak test)
@@ -190,6 +200,9 @@ working alternative within two minutes.
 - Stranger safety: display-name and avatar restrictions on matchmade tables, mute, block, report
 - Frontend: `matchmakingStore`, queue picker on the welcome page with live counts, dismissible
   queue pill, release screen, match-found countdown
+- **Admin (+1 session):** `GameFlag` (`ENABLED`/`HIDDEN`/`DISABLED`) and `PlatformFlag`, the
+  `ControlCommand` outbox and its consumer, maintenance mode, queue/cooldown visibility
+  ([12](./12-admin-console.md) §6, §7.3)
 
 ### Exit criteria
 - [ ] Two players queue the same preset → matched, seated, game auto-starts
@@ -350,6 +363,53 @@ premium plan goes live.
 
 ---
 
+## MA — Admin Console
+
+**Goal:** the operator stops using `psql` and `curl`. Sits between M7 and M8 so nothing is
+renumbered. Full specification: [12-admin-console.md](./12-admin-console.md) §11.2.
+
+By this point the admin *backend* has been growing since M0 — the audit spine and port isolation
+(M0), the ledger browser (M2), the game flags and control channel (M3). MA is where it gets a face
+and the remaining capabilities.
+
+### Scope
+
+| Area | Work |
+|---|---|
+| **Project** | `admin-frontend/` scaffold — Vite/React/Zustand/Axios, **English + LTR only, no theming, no game code**; third CI pipeline; contract mirror; Caddy `admin.` host; Playwright |
+| **Auth UI** | Login, MFA step, first-run TOTP enrollment with QR + recovery codes, step-up modal, session-expiry handling |
+| **Users** | Search, the detail page (identity, wallet, activity, integrity, guest lineage, sessions), disable/enable/ban, force-logout, name reset, admin-assisted password reset, role changes, report queue |
+| **Economy** | Cursor-paginated ledger browser, reconciliation, coin-supply charts with admin-minted share, `ADMIN_ADJUST` flow with mint ceiling, reward-rule and store-item editing |
+| **Platform** | Game `ENABLED`/`HIDDEN`/`DISABLED` control, platform flags, maintenance mode, live table list, close-table and kick-seat, matchmaking queue and cooldown panel, broadcast |
+| **Reports** | `DailyMetric` rollup job, dashboard tiles, trend charts across the six metric groups, SSE live feed |
+| **Audit** | Audit browser with filters, hash-chain verification, security-event feed |
+| **Hardening** | The full 15-test admin suite ([12](./12-admin-console.md) §10); a written incident runbook |
+
+### Exit criteria
+
+- [ ] `:3000/admin/*` returns 404 in a **deployed** environment; `:3100` is absent from `docker ps` ports
+- [ ] A fresh admin can do nothing until TOTP is enrolled
+- [ ] **Every mutating action produces an audit row** with actor, IP, reason, and before/after
+- [ ] `GET /audit/verify` detects a row deleted directly in SQL
+- [ ] Disabling a live player releases their seat, substitutes a bot, and **forfeits nothing**
+- [ ] `HIDDEN` removes a game from the welcome page within 2 s and lets a live match finish
+- [ ] `DISABLED` **with Redis stopped** still takes effect within one outbox sweep
+- [ ] `ADMIN_ADJUST` requires step-up and a reason; a retried request writes exactly one ledger row
+- [ ] The daily admin-mint ceiling refuses and raises a `SecurityEvent`
+- [ ] Reconciliation reports a hand-injected drift and **does not** correct it
+- [ ] **A live table viewed as admin passes the leak test for every seat**
+- [ ] Rollup re-run for the same day produces no duplicate rows
+- [ ] `SUPPORT` is 403 on every `ADMIN`-only route (matrix test)
+
+> **The leak test on the admin viewer is the criterion that matters.** Every other item here is
+> operational convenience; that one is the difference between an admin console and a live view of
+> everyone's cards behind a single stolen cookie ([12](./12-admin-console.md) A5).
+
+> MA has **no Cross-Milestone Definition of Done obligations** below that concern games — it ships
+> no engine, no bot, no matchmaking preset, and deliberately no `fa`/RTL.
+
+---
+
 ## M8 — Social, Stats & Cosmetics
 
 **Goal:** the app stops being five games and becomes *yours*.
@@ -413,14 +473,15 @@ not to power through six more games on a bad foundation.
 | Replay viewer UI | The **data already exists** from M0's event log — this is purely a UI project | Someone asks to watch a hand back |
 | Tournaments | Scheduling complexity for a rare use case | You want a game night with brackets |
 | Achievements | Fun, but cosmetic unlocks already cover the progression itch | M8 unlocks feel too thin |
-| Public lobby | Brings moderation, abuse, and collusion problems that dwarf the game code | Probably never — see [01](./01-business-prd.md) §3 |
+| Public lobby | Brings abuse and collusion problems that dwarf the game code | Probably never — see [01](./01-business-prd.md) §3. **Note:** the "no moderation tooling" half of this argument no longer holds — [12](./12-admin-console.md) delivers it at MA |
 | Native mobile apps | Responsive web covers phones; no new capability | Never, realistically |
 
 ---
 
 ## Cross-Milestone Definition of Done
 
-Applies to **every** milestone. A milestone is not done until all of these are true.
+Applies to **every game** milestone. A milestone is not done until all of these are true.
+(MA is the one exception — it ships no game; its own exit criteria are the whole gate.)
 
 - [ ] Engine invariants I1–I5 hold ([05](./05-game-engine-spec.md) §2)
 - [ ] Leak test passes for every seat **and** spectators
@@ -436,7 +497,7 @@ Applies to **every** milestone. A milestone is not done until all of these are t
 - [ ] `en` **and** `fa` translations complete; RTL visually reviewed
 - [ ] Keyboard playable; screen-reader announcements present
 - [ ] Mobile layout works
-- [ ] `contracts:check` green; both CI pipelines green
+- [ ] `contracts:check` green; all CI pipelines green (two projects until MA, three after)
 - [ ] The game's document in `games/` matches the implemented behaviour
 - [ ] **You've played it with an actual friend and it was fun**
 
@@ -450,4 +511,5 @@ Applies to **every** milestone. A milestone is not done until all of these are t
 - [05-game-engine-spec.md](./05-game-engine-spec.md) — per-game implementation checklist
 - [09-matchmaking.md](./09-matchmaking.md) — M3 in full
 - [10-economy-and-rewards.md](./10-economy-and-rewards.md) — M0 earning, M7 spending
+- [12-admin-console.md](./12-admin-console.md) — MA in full, plus the M0/M2/M3 admin increments
 - [games/](./games/) — the rules each milestone implements

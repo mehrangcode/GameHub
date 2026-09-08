@@ -111,7 +111,11 @@ model User {
   avatarKind    String   @default("preset")         // 'preset' | 'upload' | 'initials'
   avatarRef     String?                             // preset id or uploaded file key
   locale        String   @default("en")             // 'en' | 'fa'
-  role          String   @default("USER")           // 'USER' | 'ADMIN'
+  role          String   @default("USER")           // 'USER' | 'SUPPORT' | 'ADMIN' — [12] §3.1
+  status        String   @default("ACTIVE")         // 'ACTIVE' | 'DISABLED' | 'BANNED' — [12] §7.1
+  statusReason  String?                             // why, set by an admin; mirrored to the audit log
+  statusChangedAt DateTime?
+  statusChangedBy String?                           // acting admin's User.id
   emailVerified Boolean  @default(false)            // reserved; no email in v1
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -135,8 +139,12 @@ model User {
   cooldowns     MatchmakingCooldown[]
   blocksMade    Block[]              @relation("Blocker")
   blocksAgainst Block[]              @relation("Blocked")
+  adminCredential AdminCredential?                  // [12] §4
+  adminSessions AdminSession[]                      // [12] §4
+  adminActions  AdminAuditLog[]      @relation("AdminActor")
 
   @@index([lastSeenAt])
+  @@index([status])
 }
 
 model RefreshToken {
@@ -157,6 +165,13 @@ model RefreshToken {
   @@index([familyId])
 }
 ```
+
+> **Admin identity lives in separate models, deliberately.** `AdminCredential` (TOTP secret,
+> lockout), `AdminSession` (IP-pinned, `mfaAt` for step-up), and `AdminAuditLog` (append-only,
+> hash-chained) are specified in [12-admin-console.md](./12-admin-console.md) §4, together with
+> `GameFlag`, `PlatformFlag`, `ControlCommand`, and `DailyMetric`. An admin session is **not** a
+> player `RefreshToken` with a flag on it — logging into the game never logs you into the console
+> ([12](./12-admin-console.md) §3.2). All seven obey the §1 portability rules above.
 
 **`GuestSession`** — the model that carries persona P2:
 
@@ -1067,8 +1082,12 @@ Three properties worth stating:
 - `RewardRule` — one row per game plus a `_global` row carrying the caps. **This is the economy's
   tuning surface**; seeding it is what makes rebalancing a row update.
 - `Achievement` — the initial milestone set.
-- An admin `User` from `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`, with a funded wallet for
-  testing the store.
+- An admin `User` from `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`, with `role = 'ADMIN'` and a
+  funded wallet for testing the store. Its `AdminCredential` row has `totpEnrolledAt = null` —
+  **the seed never writes a TOTP secret**, so the first console login is forced through
+  enrollment ([12](./12-admin-console.md) §3.3).
+- `GameFlag` — one `ENABLED` row per registry slug; `PlatformFlag` — `maintenance = {"on":false}`
+  and `registrationOpen = true` ([12](./12-admin-console.md) §4.1).
 - In dev only: a demo table per game, a handful of finished matches with mixed `SeatOutcome`
   values (**including an ejected winner**, so the forfeiture path is visible without waiting for
   someone to go AFK), and a seeded wallet ledger so the statement screen has content.
@@ -1104,3 +1123,4 @@ folder is therefore **Postgres-only**, which is exactly what production needs.
 - [07-security-and-anticheat.md](./07-security-and-anticheat.md) — guest binding, seed commitment, audit log
 - [09-matchmaking.md](./09-matchmaking.md) — why the queue is Redis and these rows are not
 - [10-economy-and-rewards.md](./10-economy-and-rewards.md) — the ledger invariants these models enforce
+- [12-admin-console.md](./12-admin-console.md) §4 — the seven admin models that extend this schema
