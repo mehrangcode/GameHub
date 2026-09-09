@@ -58,10 +58,26 @@ export interface IGuestSessionRepository extends IRepository<GuestSession> {
   /** Batch lookup for seat-map display names, exactly as {@link IUserRepository.findManyByIds}. */
   findManyByIds(ids: readonly string[]): Promise<GuestSession[]>
   /**
-   * Step of the claim transaction (03 §7). The row is kept forever for audit
-   * and is never reused — a claimed guest token must stop working.
+   * ★ Step 11 of the claim transaction (03 §6.1), and its arbitration point.
+   *
+   * Stamps `claimedAt`/`claimedByUserId` **only if the session is still
+   * unclaimed**, and returns `null` when someone else got there first. That
+   * conditional is what makes the twelve-step claim race-safe: two requests
+   * with the same guest cookie both read an unclaimed session, both build a
+   * user, and exactly one of them can commit — the loser's whole transaction
+   * rolls back, including the account it created. A `findById`-then-`update`
+   * pair cannot express that; under PostgreSQL's default isolation both racers
+   * read the same unclaimed row. Same discipline as
+   * {@link IRefreshTokenRepository.revokeIfActive} and `claimSeat`.
+   *
+   * The row is kept forever, never deleted: it is the audit link between the
+   * two identities, and it is what guarantees the guest token stops working.
+   *
+   * An unknown `id` also returns `null` rather than throwing — the caller
+   * cannot act on the difference between "already claimed" and "no such
+   * session", since both mean the same thing to it.
    */
-  markClaimed(id: string, userId: string, at: Date): Promise<GuestSession>
+  claimIfUnclaimed(id: string, userId: string, at: Date): Promise<GuestSession | null>
   deleteExpired(now: Date): Promise<number>
 }
 

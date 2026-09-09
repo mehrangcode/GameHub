@@ -7,20 +7,24 @@
 | | |
 |---|---|
 | **Milestone** | M0 — Platform Skeleton |
-| **Last session completed** | **S01–S20 (Phases A + B + C + D) built and green — not yet verified by Mehrang** |
-| **Next session** | **S21 — wallet credit path: derived idempotency, caps, `CAP_REJECTED`** (3 h, 🧪) — starts Phase E |
+| **Last session completed** | **S01–S22 (Phases A + B + C + D + E) built and green — not yet verified by Mehrang** |
+| **Next session** | **S23 — Socket.IO gateway, handshake identity, `dev-socket.ts`** (3 h, 🔌) — starts Phase F |
 | **Blocked on** | Nothing in code. The two older environment items only (port 3000, Playwright deps) |
-| **Repo state** | `backend/` and `frontend/` exist. **708 backend tests**, 18 frontend tests, all green. No `admin-frontend/` (MA) |
+| **Repo state** | `backend/` and `frontend/` exist. **829 backend tests**, 18 frontend tests, all green. No `admin-frontend/` (MA) |
 
-Session spec for S21: `Documents/11-build-plan.md` §7.
+Session spec for S23: `Documents/11-build-plan.md` §8.
+
+**S23 needs two new dependencies** — `socket.io` and (for `scripts/dev-socket.ts`)
+`socket.io-client`. That is the first `npm install` since Phase C, so re-read the platform note at
+the bottom of this file first: whichever OS runs it owns the tree, and **`npm run db:generate` must
+follow it** or every DB-touching test fails with a missing Prisma engine.
 
 ## ✅ The `npm install` caveat is cleared
 
 Phase C's four dependencies (`jose`, `helmet`, `cors`, `cookie-parser`) are installed and the tree is
-**Windows**-owned again. Phase D added **no dependencies at all**, so nothing needs reinstalling
-before S21.
+**Windows**-owned again. Phases D and E added **no dependencies at all**.
 
-The 708 tests were run from WSL against the Windows tree by invoking Windows' own node directly —
+The 829 tests were run from WSL against the Windows tree by invoking Windows' own node directly —
 worth knowing, because it means the platform split no longer blocks a session:
 
 ```bash
@@ -30,9 +34,109 @@ worth knowing, because it means the platform split no longer blocks a session:
 `tsc`, `eslint`, `prettier` and `contracts:sync` are pure JS and run from either OS. Only `vitest`
 (via `esbuild`/`rollup`) is platform-bound. From Windows, plain `npm test` works as always.
 
-`frontend/` is untouched by Phases C and D apart from the regenerated `src/contracts/` mirror — its
-`typecheck` and `contracts:check` are green (both pure JS), but its **18 Vitest tests were not
-re-run**. Run `cd frontend; npm test` from Windows to confirm they are still green.
+`frontend/` is untouched by Phases C, D and E apart from the regenerated `src/contracts/` mirror
+(Phase E adds `dto/wallet.ts` to it) — its `typecheck` and `contracts:check` are green (both pure
+JS), but its **18 Vitest tests were not re-run**. Run `cd frontend; npm test` from Windows to
+confirm they are still green.
+
+## Phase E — what to verify (the gate for S21–S22)
+
+```bash
+cd backend
+npm run typecheck && npm run lint && npm test          # 829 tests
+
+# S21 — the whole session, and it needs no database for most of it.
+npx vitest run tests/unit/wallet tests/integration/wallet --reporter=verbose
+```
+
+**The names to read, in order of what they protect:**
+
+| Test | What breaks without it |
+|---|---|
+| `★ the same idempotency key credits exactly once, and returns the first row` | A socket retry pays twice (E2) |
+| `★ holds after a randomized sequence of 500 credits` | `balance` and `Σ amount` drift (E1) |
+| `★ a fully capped reward writes a zero-amount CAP_REJECTED row, never silence` | "Why did I get no coins?" is unanswerable (10 §2.4) |
+| `★ IWalletRepository declares no way to set a balance` | Someone adds `bumpCachedBalance` and E1 becomes a convention |
+| `★ the seat keeps its identity: same id, seat, team and joinedAt` | **The whole of S22.** A delete-and-reinsert passes every other test |
+| `★ a throw at step 9 rolls back BOTH the user and the seat transfer` | A claimed seat with no wallet, or the reverse |
+| `★ the guest token is dead the moment the claim commits` | The old cookie is a second, weaker credential for the account's seat |
+
+```bash
+# The four failure modes 03 §6.1 names, each asserting on what is ABSENT after:
+npx vitest run tests/integration/wallet/guest-claim.test.ts -t "failure modes" --reporter=verbose
+#   The `prisma:error  Unique constraint failed on … (email)` line in that output
+#   is the duplicate-email path working, not a fault.
+
+# ── Live. Port 3000 is occupied on this machine (see below). ────────────────
+npm run db:reset          # seeds the `_global` RewardRule the caps are read from
+PORT=3999 npm run dev
+```
+
+**`backend/requests/wallet.http` walks the whole of J2 from your editor** and says what each
+response proves. The `curl` equivalent, which is the S22 verify step from `11` §7:
+
+```bash
+API=localhost:3999/api/v1
+
+# 1. a host, a table, an invite
+curl -sc /tmp/h.txt -X POST $API/auth/register -H 'content-type: application/json' \
+  -d '{"email":"host@test.dev","password":"correct-horse-battery","displayName":"Mehrang"}' >/dev/null
+TID=$(curl -sb /tmp/h.txt -X POST $API/tables -H 'content-type: application/json' \
+  -d '{"gameSlug":"fixture","seatCount":4,"options":{}}' | jq -r .id)
+CODE=$(curl -sb /tmp/h.txt -X POST $API/tables/$TID/invites \
+  -H 'content-type: application/json' -d '{}' | jq -r .code)
+
+# 2. the friend joins and sits down — note the memberId and joinedAt it prints
+curl -sc /tmp/g.txt -X POST $API/auth/guest -H 'content-type: application/json' \
+  -d "{\"inviteCode\":\"$CODE\",\"displayName\":\"Sara\"}" | jq
+curl -sb /tmp/g.txt -X POST $API/_probe/tables/$TID/seats \
+  -H 'content-type: application/json' -d '{"seat":2}' | jq '.seats[2]'
+#   ★ keep .memberId and .joinedAt. Those two values ARE the test.
+
+# 3. give her coins — through WalletService, never an INSERT
+npx tsx scripts/dev-credit.ts --guest-cookie /tmp/g.txt --amount 120
+curl -sb /tmp/g.txt $API/_probe/wallet | jq
+#   → balance 120, status PROVISIONAL. That word is the entire signup pitch.
+
+# 4. ★ the claim
+curl -sb /tmp/g.txt -c /tmp/g.txt -X POST $API/auth/guest/claim \
+  -H 'content-type: application/json' \
+  -d '{"email":"sara@test.dev","password":"correct-horse-battery"}' | jq
+#   → { identity, redirectTo:"/table/…", vestedCoins:120, forfeitedCoins:0,
+#       seatPreserved:true }
+#   ★ redirectTo comes from the SERVER, decided by the transaction that kept
+#     the seat — the client never has to remember which table it was on.
+
+curl -sb /tmp/g.txt $API/tables/$TID | jq '.seats[2]'
+#   ★★ THE ONE THING TO LOOK HARDEST AT: memberId and joinedAt are the SAME
+#      values as in step 2, now with a user in the seat. The row was UPDATED,
+#      not recreated — so no seat was vacated, and from the other players'
+#      point of view nothing happened except a name badge losing its "guest"
+#      marker. A delete-and-reinsert would satisfy every other check here.
+
+curl -sb /tmp/g.txt $API/_probe/wallet | jq
+#   → COIN 120 VESTED, plus GEM and TICKET. A user holds all three.
+
+# 5. the guest token is dead — with the OLD jar
+curl -si -b /tmp/g.old.txt $API/auth/me | head -1     # (cp /tmp/g.txt first, in step 3)
+
+# 6. the vesting cap, on a second guest
+npx tsx scripts/dev-credit.ts --guest-cookie /tmp/g2.txt --amount 900
+#   then claim → { vestedCoins: 500, forfeitedCoins: 400 }
+#   and a GUEST_FORFEIT row for −400 reasoned GUEST_VEST_CAP. The remainder is
+#   *explained*, not merely missing.
+
+npm run db:studio
+#   WalletTransaction: the guest wallet holds +120 MATCH_REWARD and −120
+#   GUEST_VEST (balance 0, now VESTED); the user wallet holds +120 GUEST_VEST.
+#   Σ across both is 120, unchanged — coins were MOVED, never conjured (E1).
+#   Both halves share one derived key: `vest:{guestSessionId}`.
+#   GuestSession: claimedAt set, claimedByUserId set, row never deleted.
+```
+
+**Or in Postman:** folder `07 Wallet & the claim` runs the same journey with assertions attached,
+including the `memberId`/`joinedAt` comparison. 71 requests, 99 assertions, 0 failures expected —
+see the note at the bottom of this file about its **new tightest budget** (`auth:create`, 8 of 10).
 
 ## Phase D — what to verify (the gate for S17–S20)
 
@@ -344,6 +448,35 @@ hook (S178), `contracts:sync`/`check`, the test global setup and the seed test a
 `node <resolved cli.js>` — see `tests/bin.ts`. So the failure you get from Windows is now an honest
 "missing Prisma engine for this platform" rather than a misleading `ENOENT` on `npx`.
 
+## Decisions made while building Phase E (2026-09-09)
+
+| Decision | Value | Why |
+|---|---|---|
+| **The cap windows are rolling, not calendar** | `now − 1 h`, `now − 24 h` | A cap that resets at a wall-clock instant can be straddled: 2 000 coins at 23:50 and 2 000 more at 00:10 is 4 000 in twenty minutes, which is exactly the *rate* E7 exists to refuse. Same reasoning as S12's sliding-window limiter, and the same cost — "when do I earn again?" has a per-credit answer rather than a clock time. The one calendar-keyed thing stays calendar-keyed: the daily bonus, whose `daily:{holder}:{YYYY-MM-DD}` key *is* its once-a-day guarantee |
+| **`applyCaps` is a pure function in `domain/economy/caps.ts`** | takes usage + limits, returns a decision | The interesting cases are boundaries — exactly at the cap, one coin over, three caps binding at once, a cap lowered below a holder's current spend — and every one of them would otherwise need ledger rows written at controlled times. 23 unit tests, no database, no clock |
+| **A partial cap credits what fits; only zero writes `CAP_REJECTED`** | 100 requested, 30 of headroom → a 30-coin `MATCH_REWARD` row reasoned `CAP_PER_HOUR:100` | 10 §2.4's pseudocode only branches at zero, and refusing the whole reward because part of it exceeded a cap would be punitive. Recording the cap on the *paying* row means one row can render "earned 120, credited 30, hourly limit" |
+| **`reason` is a machine code with the requested amount** | `CAP_PER_HOUR:120`, `GUEST_VEST_CAP` | Same discipline as `i18nKey`: the statement renders in Persian without a round-trip through the server (02 §8.1). Two facts, neither otherwise recoverable — *which* cap bound, and what was originally earned (the credited amount is the row's own `amount`) |
+| **Four kinds are exempt from the earn caps** | `GUEST_VEST`, `ADMIN_ADJUST`, `REFUND`, and every negative amount | Each exemption is a case where a cap would make the ledger *less* true. `GUEST_VEST` **moves** coins between wallets rather than minting them — charging it against the daily cap would mean a guest who earned right up to the limit could not keep their own balance. `ADMIN_ADJUST` is an operator correcting a mistake, and a cap silently eating the correction is worse than the mistake |
+| **`sumCreditsSince` counts positive amounts only** | `amount: { gt: 0 }` in the `where` | ★ Load-bearing. If the window netted debits against credits, a player could **spend their way back under the daily cap and keep earning** — the store would become a cap bypass. A cap is on earning *rate*, and spending is not negative earning. There is a contract test named after this |
+| **`WalletService` has two entry points** | `credit()` opens a transaction; `creditWithin(repos, …)` joins one | Prisma cannot nest `$transaction`, and S22 and S36 must credit as *part of* a larger all-or-nothing transaction — a vested wallet with no transferred seat is as broken as the reverse. So the seam is a requirement, not a convenience. Asserted directly: a throw after `creditWithin` leaves no ledger row |
+| **★ E1 is enforced structurally, not by a call-site test** | `IWalletRepository` has no balance setter at all | `11` S21 asks for "a test asserting no code path calls `bumpCachedBalance` without appending a row". This codebase answers a step earlier: **there is no `bumpCachedBalance`** (the Phase B decision), so the invariant is a shape nobody can express rather than a rule they must remember. `tests/unit/wallet/ledger-invariant.test.ts` therefore guards the *design*: the interface declares no setter, the Prisma repository writes `balance:` only inside `append`, and only `append`/`markVested` touch the wallet row at all |
+| **`recompute` reports drift and does not repair it** | `{ cached, computed, drift }` | A silent self-heal would hide the write path that lied, which is the only interesting question. S38's job is an `ALERT`, not a fix |
+| **`IRewardRuleRepository` added; the caps are read from `_global` per credit** | falls back to 10 §3.7's numbers when the row is missing | Rebalancing the economy is a row update, not a deploy (10 §3) — and the numbers in the spec are explicitly a starting guess. Falling back rather than throwing is deliberate: an unseeded developer database must not fail its first credit, and an *uncapped* economy is the worse of the two failures |
+| **`capMultiplier` declared now, unused until M7** | defaults to 1; scales the hourly and daily ceilings only | E3 — premium buys earn *rate*, never immunity, and never touches the guest cap (a guest holds no subscription). Declaring it now means the multiplier has exactly one home in the economy instead of appearing in the reward formula *and* the caps |
+| **★ `markClaimed` replaced by `claimIfUnclaimed`, returning null on a loss** | conditional `updateMany where { id, claimedAt: null }` | The old signature could not express an atomic claim: two requests with one guest cookie both read an unclaimed session, both build a user, and under PostgreSQL READ COMMITTED both would commit. The conditional write makes the database pick a winner and the loser's whole twelve-step transaction unwind — same discipline as `revokeIfActive` and `claimSeat`. Nothing called the old method yet, so replacing it beat having two ways to claim |
+| **An unknown guest id also returns `null`, not `NotFoundError`** | matches Prisma's `updateMany` | The caller cannot act on the difference between "already claimed" and "no such session" — both mean "this is not yours to claim" — and a fake that threw where the database returns 0 rows would be a lying fake. There is a contract test for it |
+| **`IMatchParticipantRepository` created deliberately narrow** | `reattributeActor` + two counts | Step 7 of the claim needs it now; settlement (S36) will grow it. Reaching into Prisma from the claim service instead would have broken guard 1 and made the claim untestable against the fakes. Its populated case is tested against the *database* rather than in the contract suite, because a `MatchParticipant` row needs a `MatchResult` and no repository can create one yet — an honest gap, not a hidden one |
+| **`IChatRepository.reattributeActor` added** | `updateMany` on `guestSessionId` | Without it the transcript of the hand a player just joined keeps addressing a guest session that no longer exists, and moderation (12 §6) has no way to attribute what was said to the account that said it |
+| **The mirror-negative row shares the vest's key** | both halves carry `vest:{guestSessionId}` | Uniqueness is per *wallet*, so one derived key identifies the pair and both halves replay together or not at all. A capped claim additionally writes `GUEST_FORFEIT` for the remainder under `forfeit:{guestSessionId}` — the guest wallet lands on exactly zero and the shortfall is *explained* rather than merely absent |
+| **The emptied guest wallet is kept and marked `VESTED`** | `markVested(provisional.id)` | It is the guest half of the audit trail. Leaving it `PROVISIONAL` at zero would read as "coins still waiting" on any screen that filters by status |
+| **`GuestSession.prefsJson` is copied through a whitelist** | `application/mappers/preferences.ts` | The blob was written by a client and `preferences.upsert` spreads its patch straight into Prisma — an unknown key would crash the claim, and a key matching a different column would let a guest set it. Every field is named, every enum value checked against `contracts/enums.ts`, and anything else is **dropped rather than rejected**: losing an unrecognised theme preference must never cost somebody their seat |
+| **`POST /auth/guest/claim` carries no `requireIdentity()`** | reads the `guest` cookie directly | `authenticate` resolves the access cookie *first* (correctly — a player who signed up mid-session **is** a user), so a browser holding both would present as a user and `req.identity` would never be the guest being claimed. The service refuses, not the middleware. There is a Postman assertion that a `tableId` in the body is a 400: that is the field somebody will eventually try to add, and accepting it would make this a route that can take another table's seat |
+| **The claim distinguishes its refusal reasons; the invite endpoint does not** | `GUEST_EXPIRED` vs `ALREADY_CLAIMED` vs `NO_GUEST_SESSION` | The caller is presenting a cookie *we issued to them*, so possession is already proof and a reason confirms nothing about anyone else. And it is worth having: "your session expired" and "this was already upgraded" send the player to two different screens. What stays undifferentiated is a token that resolves to nothing — malformed, forged, unknown and swept all answer `NO_GUEST_SESSION`, where the difference *would* be information about which tokens exist |
+| **`clearGuestCookie` added** | clears `guest` only | The claim issues `access` + `refresh` and must retire `guest` in the same response. `clearAuthCookies` would have cleared the two cookies just issued — a bug that would have looked like "the claim logs you out" |
+| **`GET /_probe/wallet`, dev-only, dated for deletion in S37** | `probe.routes.ts` | S22's verification is "provisional 120 before, vested 120 after" and that sentence needs something to read; the real `GET /wallet` is S37's deliverable. Same precedent and same fate as S16's `/_probe/table/:tableId` |
+| **`scripts/dev-credit.ts` grants coins through `WalletService`** | never an `INSERT` | Nothing is earnable before S36 settles a match, so the setup for a hand-walked J2 has to come from somewhere. Going through the service means the derived key, the caps, `balanceAfter` and the audit row all happen — teaching anyone to insert a ledger row by hand is how a cached balance and its ledger drift apart, which is the exact failure E1 exists to prevent. It refuses to run under `NODE_ENV=production` |
+| **Eight Phase E counters added** | incl. `wallet_credits_replayed` | That one is the mechanism *working*: it counts idempotency keys that collided. A spike means something upstream is retrying; a permanent zero probably means the keys stopped being derived |
+
 ## Decisions made while building Phase D (2026-09-09)
 
 | Decision | Value | Why |
@@ -475,10 +608,28 @@ hook (S178), `contracts:sync`/`check`, the test global setup and the seed test a
 
 ## Notes for next session
 
-- **S21 needs no new dependencies either.** It is the wallet credit path — derived idempotency keys,
-  the daily caps from `RewardRule._global`, and `CAP_REJECTED`. `IWalletRepository.append()` is
-  already the *only* mutation the interface exposes, so E1 ("balance is written only inside the
-  transaction that appends the ledger row") is structural before S21 writes a line.
+- **S23 needs `socket.io` and `socket.io-client`** — the first `npm install` since Phase C. Read the
+  platform note below before running it, and **run `npm run db:generate` afterwards**.
+- **Every credit in the platform must go through `WalletService`.** `credit(input)` opens its own
+  transaction; `creditWithin(repos, input)` joins one the caller already opened — that second form is
+  what S36's settlement and S22's vesting use, and it is the only way to credit as part of a larger
+  all-or-nothing transaction. Do not call `repos.wallets.append` from a service: it bypasses the caps
+  and the derived-key check. The one exception in the codebase is the claim's mirror-negative and
+  forfeit rows, which are deliberate ledger *movements* rather than earnings, and they are commented
+  as such.
+- **Idempotency keys come from `domain/economy/idempotency.ts`.** `matchRewardKey(matchResultId, seat)`
+  is the one S36 wants — **per seat**, because an ejected player earns zero while their partner is
+  paid in full, and one match therefore produces several distinct credits. Never assemble a key
+  inline; `tests/unit/wallet/idempotency.test.ts` pins every format to 10 §2.4 as a literal.
+- **`repos.rewardRules`, `repos.participants` and `IChatRepository.reattributeActor` are new.**
+  `findForGame(slug, variant)` already implements S35's `slug:variant` → `slug` fallback, so do not
+  re-derive it. `participants` is deliberately narrow — S36 grows it into the settlement repository.
+- **The reward *formula* is S35 and does not exist yet.** S21 built the credit *path*: caps,
+  idempotency, `CAP_REJECTED`. `RewardRule.baseAmount`, `placement`, `expectedMinMs` and
+  `repeatDecay` are read into the domain by the mapper and nothing consumes them yet. `capMultiplier`
+  on `CreditInput` is the hook premium uses in M7.
+- **Two dev-only routes are now dated for deletion.** `/_probe/tables/:id/seats*` in **S24**, and
+  `GET /_probe/wallet` in **S37**. Both are marked in `probe.routes.ts`. `POST /_probe` (S12) stays.
 - **All four access levels now exist.** `requireIdentity()` (**G**), `requireUser()` (**U**),
   `requireHost(container.tables)` (**H**, stashes the row on `req.table`), `requireRole(...)` (**A**,
   admin process only).
@@ -507,9 +658,9 @@ hook (S178), `contracts:sync`/`check`, the test global setup and the seed test a
   bugs rather than rate limits. `registerUser(app)` returns a cookie-carrying agent.
 - **`buildApp(container)` takes the container.** `buildContainer` accepts
   `{ prisma, logger, env, rateLimiter }` overrides.
-- **`requests/tables.http` exists now** and covers all of Phase D — catalog, table CRUD, invites,
-  seats — in the same style: every block says what the response should be and why it matters. Grow
-  it, or start `requests/wallet.http` for S21/S37.
+- **`requests/tables.http` and `requests/wallet.http` exist** and cover all of Phases D and E in the
+  same style: every block says what the response should be and why it matters. `wallet.http` walks
+  journey J2 end to end. Grow them, or start `requests/socket.md` alongside `dev-socket.ts` for S23.
 - **The contract suite is the cheapest test you will ever write.** Adding a repository method means
   adding one `it(...)` in `tests/unit/repositories/contract/` and getting it verified against both
   the fake and SQLite. Add the method to the interface first, then the test, then both
@@ -532,9 +683,10 @@ hook (S178), `contracts:sync`/`check`, the test global setup and the seed test a
 ## The Postman collection (`postman/`, added 2026-09-09)
 
 `Template.postman_collection.json` + `Template.local.postman_environment.json`. Import both, pick
-the **Template — local** environment, and run the collection top to bottom: 58 requests, 77
-assertions, folders `00 Health` → `08 Teardown`. It is a smoke test of the REST surface, not a
-replacement for Vitest — concurrency, audit rows and the leak checks live there.
+the **Template — local** environment, and run the collection top to bottom: **71 requests, 99
+assertions**, folders `00 Health` → `09 Teardown`. It is a smoke test of the REST surface, not a
+replacement for Vitest — concurrency, rollback, ledger arithmetic, audit rows and the leak checks
+live there.
 
 **It must grow with every phase** (step 5 of the protocol above), and it must be *run*, not just
 edited:
@@ -543,16 +695,22 @@ edited:
 # 1. an API this side of the WSL/Windows split, without touching prisma/dev.db
 cd backend
 npm run build                                     # tsc is pure JS — works from WSL
-cp prisma/dev.db prisma/postman-check.db
+cp prisma/dev.db prisma/postman-check.db          # ★ BEFORE starting the server
 DATABASE_URL="file:./postman-check.db" PORT=3999 node dist/main.js &
 
-# 2. run it
+# 2. run it — ONCE. See the budget note below.
 cd .. && npx --yes newman run postman/Template.postman_collection.json \
-  -e postman/Template.local.postman_environment.json
+  -e postman/Template.local-3999.postman_environment.json
 
 # 3. clean up
 rm backend/prisma/postman-check.db && rm -rf backend/dist
 ```
+
+**Swap the database file *before* the server starts, never while it is running.** Cost an hour
+during S22: `rm && cp` on `postman-check.db` under a live server leaves SQLite holding a handle to
+the deleted inode, so every request afterwards fails against a database nobody can see — and the
+symptom is a wall of 401s and `tableId: null` that reads exactly like a broken collection. To rerun,
+stop the server, re-copy, start it again.
 
 `npm run dev` cannot be used for this from WSL (tsx → esbuild is Windows-only in this tree), and
 **`PORT=... node.exe` does not work either**: WSL does not pass environment variables to Windows
@@ -560,12 +718,24 @@ processes unless they are listed in `WSLENV`, so the server silently boots on `:
 `dev.db`. Building and running with WSL's own node sidesteps both — the Linux Prisma engine is
 already generated.
 
-Three things about the collection worth remembering:
+Five things about the collection worth remembering:
 
+- **★ `auth:create` is now the tightest budget in the collection — 8 of 10.** `/auth/register`,
+  `/auth/guest` and `/auth/guest/claim` share one bucket of **10 per minute per IP**, because each
+  mints an account and burns an argon2 hash and an attacker must not get ten of each. One full run
+  spends eight of them (register, two guest joins in folder 06, one join and four claims in folder
+  07). So folder 07 is the *first* place a too-soon rerun 429s — before the global 100/min limiter
+  ever bites — and **a full minute between runs is now mandatory**, not merely advisable. If you add
+  a request that registers, joins as a guest, or claims, take one out. One check was already removed
+  for this reason (see folder 07's description).
 - **A logged-in user masks a guest.** `authenticate` resolves the access cookie *before* the guest
-  cookie, so with both in Postman's jar you are always the user. Folder `06` clears the jar in a
-  pre-request script and logs back in at the end. Any new guest-facing request must sit inside that
-  folder, or it will silently assert the host's behaviour.
+  cookie, so with both in Postman's jar you are always the user. Folders `06` and `07` clear the jar
+  in a pre-request script and log back in at the end. Any new guest-facing request must sit inside
+  one of those folders, or it will silently assert the host's behaviour.
+- **Folder 07 runs against a table with history.** Folder 05 left a bot at seat 3 and released seat
+  1, so the claim journey uses seat **2** — which is worth knowing before adding a seat assertion
+  anywhere. And the seat map's `memberId` is what makes the headline claim assertion possible over
+  REST at all: the collection captures it before the claim and demands the same value after.
 - **No CSRF token anywhere, correctly.** Postman sends no `Origin`/`Referer`, so the double-submit
   token is not demanded. Adding an `Origin` header by hand requires `X-CSRF-Token` too.
 - **It found a real bug on its first run** — see the alphabet row in the Phase D decisions.

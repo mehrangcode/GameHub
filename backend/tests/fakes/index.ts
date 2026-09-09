@@ -1,11 +1,16 @@
 import type { IUnitOfWork, Repositories } from '../../src/domain/repositories/Repositories.js'
-import { InMemoryCosmeticRepository, InMemoryWalletRepository } from './economy.js'
+import {
+  InMemoryCosmeticRepository,
+  InMemoryRewardRuleRepository,
+  InMemoryWalletRepository,
+} from './economy.js'
 import {
   InMemoryGameEventRepository,
   InMemoryGameInstanceRepository,
   InMemoryGameSnapshotRepository,
   InMemoryStatsRepository,
 } from './games.js'
+import { InMemoryMatchParticipantRepository } from './matches.js'
 import {
   InMemoryGuestSessionRepository,
   InMemoryPreferencesRepository,
@@ -22,6 +27,7 @@ import {
 export * from './economy.js'
 export * from './games.js'
 export * from './identity.js'
+export * from './matches.js'
 export * from './store.js'
 export * from './tables.js'
 
@@ -32,6 +38,10 @@ export interface InMemoryRepositories extends Repositories {
   readonly games: InMemoryGameInstanceRepository
   readonly cosmetics: InMemoryCosmeticRepository
   readonly wallets: InMemoryWalletRepository
+  readonly rewardRules: InMemoryRewardRuleRepository
+  /** Exposed concretely because rows can only be seeded directly (no `create`). */
+  readonly participants: InMemoryMatchParticipantRepository
+  readonly chat: InMemoryChatRepository
 }
 
 /**
@@ -64,7 +74,9 @@ export function buildInMemoryRepositories(): InMemoryRepositories {
     events,
     snapshots: new InMemoryGameSnapshotRepository(),
     stats: new InMemoryStatsRepository(),
+    participants: new InMemoryMatchParticipantRepository(),
     wallets: new InMemoryWalletRepository(),
+    rewardRules: new InMemoryRewardRuleRepository(),
     cosmetics: new InMemoryCosmeticRepository(),
   }
 }

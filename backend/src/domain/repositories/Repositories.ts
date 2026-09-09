@@ -1,10 +1,11 @@
-import type { ICosmeticRepository, IWalletRepository } from './economy.js'
+import type { ICosmeticRepository, IRewardRuleRepository, IWalletRepository } from './economy.js'
 import type {
   IGameEventRepository,
   IGameInstanceRepository,
   IGameSnapshotRepository,
   IStatsRepository,
 } from './games.js'
+import type { IMatchParticipantRepository } from './matches.js'
 import type {
   IGuestSessionRepository,
   IPreferencesRepository,
@@ -38,8 +39,12 @@ export interface Repositories {
   readonly events: IGameEventRepository
   readonly snapshots: IGameSnapshotRepository
   readonly stats: IStatsRepository
+  /** Narrow until S36 — the claim transaction's re-attribution needs it now. */
+  readonly participants: IMatchParticipantRepository
 
   readonly wallets: IWalletRepository
+  /** The caps and rates, as data (10 §3). Read inside the credit transaction. */
+  readonly rewardRules: IRewardRuleRepository
   readonly cosmetics: ICosmeticRepository
 }
 

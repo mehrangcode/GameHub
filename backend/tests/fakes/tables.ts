@@ -307,4 +307,12 @@ export class InMemoryChatRepository implements IChatRepository {
   async redact(id: string, at: Date): Promise<ChatMessage> {
     return this.rows.patch(id, { redactedAt: at })
   }
+
+  async reattributeActor(guestSessionId: string, userId: string): Promise<number> {
+    const mine = this.rows.all().filter((m) => m.guestSessionId === guestSessionId)
+    for (const message of mine) {
+      this.rows.patch(message.id, { userId, guestSessionId: null })
+    }
+    return mine.length
+  }
 }

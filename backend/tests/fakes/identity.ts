@@ -118,7 +118,13 @@ export class InMemoryGuestSessionRepository implements IGuestSessionRepository {
     this.rows.remove(id)
   }
 
-  async markClaimed(id: string, userId: string, at: Date): Promise<GuestSession> {
+  async claimIfUnclaimed(id: string, userId: string, at: Date): Promise<GuestSession | null> {
+    // An unknown id yields `null`, not a throw — matching Prisma's
+    // `updateMany`, which reports zero rows affected rather than P2025. The
+    // caller cannot act on the difference anyway: both mean "this session is
+    // not yours to claim".
+    const row = this.rows.peek(id)
+    if (!row || row.claimedAt !== null) return null
     return this.rows.patch(id, { claimedAt: at, claimedByUserId: userId })
   }
 

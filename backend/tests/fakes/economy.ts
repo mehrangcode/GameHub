@@ -1,12 +1,15 @@
-import type { AssetCode } from '../../src/contracts/enums.js'
-import type { Wallet, WalletTransaction } from '../../src/domain/entities/economy.js'
+import type { AssetCode, TransactionKind } from '../../src/contracts/enums.js'
+import type { RewardRule, Wallet, WalletTransaction } from '../../src/domain/entities/economy.js'
 import type { CosmeticItem, UserCosmetic } from '../../src/domain/entities/user.js'
+import { GLOBAL_REWARD_RULE_ID } from '../../src/domain/economy/caps.js'
 import type {
   AppendResult,
   CosmeticFilter,
   ICosmeticRepository,
+  IRewardRuleRepository,
   IWalletRepository,
   LedgerEntry,
+  NewRewardRule,
 } from '../../src/domain/repositories/economy.js'
 import type { PageQuery } from '../../src/domain/repositories/IRepository.js'
 import type { IdentityRef } from '../../src/domain/value-objects/identity.js'
@@ -114,8 +117,66 @@ export class InMemoryWalletRepository implements IWalletRepository {
       .reduce((sum, t) => sum + t.amount, 0)
   }
 
+  async sumCreditsSince(
+    walletId: string,
+    since: Date,
+    kinds: readonly TransactionKind[],
+  ): Promise<number> {
+    return this.creditWindow(walletId, since, kinds).reduce((sum, t) => sum + t.amount, 0)
+  }
+
+  async countCreditsSince(
+    walletId: string,
+    since: Date,
+    kinds: readonly TransactionKind[],
+  ): Promise<number> {
+    return this.creditWindow(walletId, since, kinds).length
+  }
+
+  /** Credits only, `gte` on the boundary — the Prisma `where` clause, in TS. */
+  private creditWindow(walletId: string, since: Date, kinds: readonly TransactionKind[]) {
+    return this.transactions
+      .all()
+      .filter(
+        (t) =>
+          t.walletId === walletId &&
+          t.amount > 0 &&
+          kinds.includes(t.kind) &&
+          t.createdAt.getTime() >= since.getTime(),
+      )
+  }
+
   async markVested(walletId: string): Promise<Wallet> {
     return this.rows.patch(walletId, { status: 'VESTED', updatedAt: new Date() })
+  }
+}
+
+export class InMemoryRewardRuleRepository implements IRewardRuleRepository {
+  readonly rows = new Collection<RewardRule>('RewardRule')
+
+  async upsert(rule: NewRewardRule & { id: string }): Promise<RewardRule> {
+    const row: RewardRule = { active: true, ...rule, updatedAt: new Date() }
+    return this.rows.peek(row.id) ? this.rows.patch(row.id, row) : this.rows.insert(row)
+  }
+
+  async findById(id: string): Promise<RewardRule | null> {
+    return this.rows.get(id)
+  }
+
+  async findForGame(gameSlug: string, variant?: string): Promise<RewardRule | null> {
+    if (variant !== undefined) {
+      const specific = await this.findById(`${gameSlug}:${variant}`)
+      if (specific) return specific
+    }
+    return this.findById(gameSlug)
+  }
+
+  async findGlobal(): Promise<RewardRule | null> {
+    return this.findById(GLOBAL_REWARD_RULE_ID)
+  }
+
+  async listActive(): Promise<RewardRule[]> {
+    return this.rows.filter((r) => r.active).sort((a, b) => a.id.localeCompare(b.id))
   }
 }
 

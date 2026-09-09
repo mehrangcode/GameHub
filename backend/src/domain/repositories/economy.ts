@@ -1,8 +1,8 @@
 import type { AssetCode, TransactionKind, UnlockKind } from '../../contracts/enums.js'
-import type { Wallet, WalletTransaction } from '../entities/economy.js'
+import type { RewardRule, Wallet, WalletTransaction } from '../entities/economy.js'
 import type { CosmeticItem, UserCosmetic } from '../entities/user.js'
 import type { IdentityRef } from '../value-objects/identity.js'
-import type { PageQuery } from './IRepository.js'
+import type { Draft, PageQuery } from './IRepository.js'
 
 /**
  * What a caller appends to the ledger. Note what is **absent**: `balanceAfter`
@@ -53,8 +53,64 @@ export interface IWalletRepository {
   listTransactions(walletId: string, page?: PageQuery): Promise<WalletTransaction[]>
   /** Recomputes the truth for the nightly reconciliation (S38). */
   sumTransactions(walletId: string): Promise<number>
+
+  /**
+   * ★ The cap windows (E7, 10 §3.7) — Σ of **positive** amounts of the given
+   * kinds since `since`.
+   *
+   * Positive-only, and it matters: including debits would let a player spend
+   * their way back under the daily cap and keep earning, which turns the store
+   * into a cap bypass. A cap is on *earning rate*, and spending is not
+   * negative earning.
+   *
+   * Aggregated in the database rather than by summing rows in the service,
+   * because a holder who has played all evening has hundreds of rows and this
+   * runs inside the credit transaction on every single credit.
+   */
+  sumCreditsSince(walletId: string, since: Date, kinds: readonly TransactionKind[]): Promise<number>
+  /**
+   * How many credits of those kinds landed since `since` — the
+   * matches-per-day cap, which counts events rather than coins.
+   *
+   * Zero-amount `CAP_REJECTED` rows are excluded by the `kinds` filter, so a
+   * capped match does not itself consume a match slot. That is the kinder
+   * reading and the defensible one: the cap is on rewards *paid*.
+   */
+  countCreditsSince(
+    walletId: string,
+    since: Date,
+    kinds: readonly TransactionKind[],
+  ): Promise<number>
+
   /** Guest vesting: the provisional wallet becomes spendable (10 §3.4). */
   markVested(walletId: string): Promise<Wallet>
+}
+
+/** `updatedAt` is the database's; everything else is the operator's. */
+export type NewRewardRule = Draft<RewardRule, 'active'>
+
+/**
+ * The economy's tuning knobs, as data — 10 §3, 03 §3.9.
+ *
+ * `RewardRule` rows are read, not compiled: rebalancing is a row update, not a
+ * deploy, and the numbers in 10 §3 are explicitly a starting guess. Two shapes
+ * of row live in one table — `_global` carries the caps every holder is
+ * measured against, and one row per game (or `slug:variant`) carries that
+ * game's rates.
+ */
+export interface IRewardRuleRepository {
+  /** Idempotent by `id` — how the S06 seed and the admin console both write. */
+  upsert(rule: NewRewardRule & { id: string }): Promise<RewardRule>
+  findById(id: string): Promise<RewardRule | null>
+  /**
+   * `${gameSlug}:${variant}` if a variant is given and such a row exists,
+   * otherwise `${gameSlug}`. S35's lookup, in the repository so that the
+   * fallback cannot be implemented twice and differently.
+   */
+  findForGame(gameSlug: string, variant?: string): Promise<RewardRule | null>
+  /** The `_global` row: caps and the vesting bound. `null` before the seed runs. */
+  findGlobal(): Promise<RewardRule | null>
+  listActive(): Promise<RewardRule[]>
 }
 
 export interface CosmeticFilter {

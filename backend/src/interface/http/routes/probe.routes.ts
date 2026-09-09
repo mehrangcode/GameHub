@@ -1,7 +1,9 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import type { Container } from '../../../container.js'
+import { toWalletBalanceDto, toWalletTransactionDto } from '../../../application/mappers/wallet.js'
 import { ClaimSeatRequestSchema, type ClaimSeatRequest } from '../../../contracts/dto/tables.js'
+import { ASSET_CODES } from '../../../contracts/enums.js'
 import { botRef } from '../../../domain/value-objects/identity.js'
 import type { OccupantRef } from '../../../domain/value-objects/identity.js'
 import { enforceGuestBinding, identityRefOf, requireIdentity } from '../middleware/authorize.js'
@@ -18,6 +20,8 @@ import { validBody, validParams, zodValidate } from '../middleware/validate.js'
  *      demonstrates each boundary guarantee: a required field, a refusal to
  *      coerce `"5"` into `5`, and rejection of an unknown key.
  *   2. `/_probe/tables/:id/seats` (S20) — seat claim and release over HTTP.
+ *   3. `GET /_probe/wallet` (S21) — a balance to read, until S37 ships the real
+ *      `GET /wallet`.
  *
  * **The seat routes are temporary and dated.** Seat changes are socket
  * traffic: if a friend at the table would watch it happen, it goes over the
@@ -95,6 +99,36 @@ export function buildProbeRouter(container: Container): Router {
       const { id, seat } = validParams<SeatPathParams>(req)
       const actor = await actorFor(container, id, req.identity!)
       res.json(await tables.releaseSeat(id, seat, actor))
+    }),
+  )
+
+  /**
+   * `GET /_probe/wallet` — dev-only, **delete in S37**.
+   *
+   * The real `GET /wallet` and `/wallet/transactions` are S37's deliverable
+   * (02 §5). This exists because S22's verification is "provisional 120 before,
+   * vested 120 after" and that sentence needs something to read. Same
+   * precedent, same reasoning and same fate as S16's `/_probe/table/:tableId`:
+   * the *service* is the deliverable, and this is a window onto it.
+   *
+   * Level **G** — a guest may read their own provisional balance, which is the
+   * whole point of accruing it (10 §3.4). A holder can only ever see their own:
+   * there is no id parameter to point at somebody else.
+   */
+  router.get(
+    '/_probe/wallet',
+    requireIdentity(),
+    asyncHandler(async (req, res) => {
+      const holder = identityRefOf(req.identity!)
+      const assets = holder.kind === 'user' ? ASSET_CODES : (['COIN'] as const)
+      const balances = await container.wallets.balances(holder, assets)
+
+      res.json({
+        balances: balances.map(toWalletBalanceDto),
+        transactions: (await container.wallets.statement(holder, 'COIN', { limit: 20 })).map(
+          toWalletTransactionDto,
+        ),
+      })
     }),
   )
 

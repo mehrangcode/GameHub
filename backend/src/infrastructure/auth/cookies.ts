@@ -78,6 +78,19 @@ export function setCsrfCookie(res: Response, token: string, env: Env = getEnv())
 }
 
 /**
+ * Retires just the guest cookie — the last step of journey J2 (S22).
+ *
+ * The claim sets `access` and `refresh` and must clear `guest` in the same
+ * response: the session is dead server-side the moment the transaction commits,
+ * and a browser still holding it would send a credential that can only ever be
+ * refused. `clearAuthCookies` is the wrong tool here — it would clear the two
+ * cookies we have just issued.
+ */
+export function clearGuestCookie(res: Response, env: Env = getEnv()): void {
+  res.clearCookie(AUTH_COOKIES.guest, base(env))
+}
+
+/**
  * Clears every auth cookie. `clearCookie` only matches on name **and path**, so
  * the refresh cookie must be cleared with the path it was set with — get this
  * wrong and logout leaves a live refresh cookie in the browser while looking

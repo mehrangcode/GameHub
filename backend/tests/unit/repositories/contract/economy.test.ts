@@ -1,8 +1,30 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { REPO_HARNESSES } from '../../../harnesses.js'
+import type { TransactionKind } from '../../../../src/contracts/enums.js'
+import type { RewardRule } from '../../../../src/domain/entities/economy.js'
 import type { CosmeticItem } from '../../../../src/domain/entities/user.js'
+import type { NewRewardRule } from '../../../../src/domain/repositories/economy.js'
 import { guestRef, userRef } from '../../../../src/domain/value-objects/identity.js'
 import { makeGuest, makeTable, makeUser } from '../fixtures.js'
+
+/** Every row ever written is inside a window that starts here. */
+const EPOCH = new Date(0)
+
+const rule = (overrides: Partial<RewardRule> & { id: string }): NewRewardRule & { id: string } => ({
+  gameSlug: overrides.id.split(':')[0] ?? overrides.id,
+  assetCode: 'COIN',
+  baseAmount: 50,
+  placement: { draw: 1, bySeatCount: {} },
+  expectedMinMs: 0,
+  repeatDecay: [1, 1, 0.6, 0.3, 0.1],
+  capPerHour: 400,
+  capPerDay: 2_000,
+  capPerDayGuest: 500,
+  capMatchesPerDay: 30,
+  guestVestCap: 500,
+  active: true,
+  ...overrides,
+})
 
 const item = (overrides: Partial<CosmeticItem> & { id: string }): CosmeticItem => ({
   category: 'CARD_BACK',
@@ -240,6 +262,197 @@ describe.each(REPO_HARNESSES)('[$name] economy repositories', (harness) => {
       const wallet = await repos.wallets.ensure(guestRef(guest.id), 'COIN')
 
       expect((await repos.wallets.markVested(wallet.id)).status).toBe('VESTED')
+    })
+  })
+
+  describe('IWalletRepository — the cap windows (E7)', () => {
+    async function walletWith(
+      repos: ReturnType<typeof harness.repos>,
+      rows: Array<{ amount: number; kind: TransactionKind }>,
+    ) {
+      const user = await makeUser(repos)
+      const wallet = await repos.wallets.ensure(userRef(user.id), 'COIN')
+      for (const [i, row] of rows.entries()) {
+        await repos.wallets.append({
+          walletId: wallet.id,
+          amount: row.amount,
+          kind: row.kind,
+          idempotencyKey: `window-${i}`,
+        })
+      }
+      return wallet
+    }
+
+    const EARNS: readonly TransactionKind[] = [
+      'MATCH_REWARD',
+      'DAILY_BONUS',
+      'ACHIEVEMENT',
+      'PREMIUM_GRANT',
+    ]
+
+    it('sums only the requested kinds', async () => {
+      const repos = harness.repos()
+      const wallet = await walletWith(repos, [
+        { amount: 100, kind: 'MATCH_REWARD' },
+        { amount: 50, kind: 'DAILY_BONUS' },
+        { amount: 25, kind: 'ADMIN_ADJUST' },
+      ])
+
+      expect(await repos.wallets.sumCreditsSince(wallet.id, EPOCH, EARNS)).toBe(150)
+      expect(await repos.wallets.sumCreditsSince(wallet.id, EPOCH, ['MATCH_REWARD'])).toBe(100)
+    })
+
+    it('★ ignores debits — spending is not negative earning', async () => {
+      const repos = harness.repos()
+      const wallet = await walletWith(repos, [
+        { amount: 300, kind: 'MATCH_REWARD' },
+        { amount: -200, kind: 'PURCHASE' },
+      ])
+
+      // If this returned 100, a player could spend their way back under the
+      // daily cap and keep earning — the store would be a cap bypass.
+      expect(await repos.wallets.sumCreditsSince(wallet.id, EPOCH, EARNS)).toBe(300)
+    })
+
+    it('excludes zero-amount CAP_REJECTED rows from both aggregates', async () => {
+      const repos = harness.repos()
+      const wallet = await walletWith(repos, [
+        { amount: 40, kind: 'MATCH_REWARD' },
+        { amount: 0, kind: 'CAP_REJECTED' },
+      ])
+
+      expect(await repos.wallets.sumCreditsSince(wallet.id, EPOCH, EARNS)).toBe(40)
+      // A capped match does not itself consume a match slot.
+      expect(await repos.wallets.countCreditsSince(wallet.id, EPOCH, ['MATCH_REWARD'])).toBe(1)
+    })
+
+    it('counts match rewards for the matches-per-day cap', async () => {
+      const repos = harness.repos()
+      const wallet = await walletWith(repos, [
+        { amount: 10, kind: 'MATCH_REWARD' },
+        { amount: 10, kind: 'MATCH_REWARD' },
+        { amount: 50, kind: 'DAILY_BONUS' },
+      ])
+
+      expect(await repos.wallets.countCreditsSince(wallet.id, EPOCH, ['MATCH_REWARD'])).toBe(2)
+    })
+
+    it('a window that starts in the future sees nothing', async () => {
+      const repos = harness.repos()
+      const wallet = await walletWith(repos, [{ amount: 90, kind: 'MATCH_REWARD' }])
+      const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000)
+
+      expect(await repos.wallets.sumCreditsSince(wallet.id, tomorrow, EARNS)).toBe(0)
+      expect(await repos.wallets.countCreditsSince(wallet.id, tomorrow, EARNS)).toBe(0)
+    })
+
+    it('is scoped to one wallet', async () => {
+      const repos = harness.repos()
+      const mine = await walletWith(repos, [{ amount: 70, kind: 'MATCH_REWARD' }])
+      await walletWith(repos, [{ amount: 500, kind: 'MATCH_REWARD' }])
+
+      expect(await repos.wallets.sumCreditsSince(mine.id, EPOCH, EARNS)).toBe(70)
+    })
+  })
+
+  describe('IRewardRuleRepository — the economy as data (10 §3)', () => {
+    it('upserts by id, so the seed and the admin console are idempotent', async () => {
+      const repos = harness.repos()
+      await repos.rewardRules.upsert(rule({ id: 'shelem', baseAmount: 80 }))
+      const raised = await repos.rewardRules.upsert(rule({ id: 'shelem', baseAmount: 95 }))
+
+      expect(raised.baseAmount).toBe(95)
+      expect(await repos.rewardRules.listActive()).toHaveLength(1)
+    })
+
+    it('round-trips the JSON columns as parsed objects', async () => {
+      const repos = harness.repos()
+      await repos.rewardRules.upsert(
+        rule({
+          id: 'sudoku',
+          placement: { draw: 1, bySeatCount: { '4': { '1': 1.5, '2': 1 } } },
+          repeatDecay: [1, 1, 0.6, 0.3, 0.1],
+        }),
+      )
+
+      const found = await repos.rewardRules.findById('sudoku')
+      // The mapper's job: SQLite stores text, the domain sees a shape (03 §1).
+      expect(found?.placement.bySeatCount['4']?.['1']).toBe(1.5)
+      expect(found?.repeatDecay).toEqual([1, 1, 0.6, 0.3, 0.1])
+    })
+
+    it('★ prefers slug:variant over slug, and falls back when it is absent', async () => {
+      const repos = harness.repos()
+      await repos.rewardRules.upsert(rule({ id: 'chess', baseAmount: 30 }))
+      await repos.rewardRules.upsert(rule({ id: 'chess:rapid', baseAmount: 45 }))
+
+      expect((await repos.rewardRules.findForGame('chess', 'rapid'))?.baseAmount).toBe(45)
+      expect((await repos.rewardRules.findForGame('chess', 'blitz'))?.baseAmount).toBe(30)
+      expect((await repos.rewardRules.findForGame('chess'))?.baseAmount).toBe(30)
+      expect(await repos.rewardRules.findForGame('nope')).toBeNull()
+    })
+
+    it('finds the _global caps row, and misses cleanly before the seed runs', async () => {
+      const repos = harness.repos()
+      expect(await repos.rewardRules.findGlobal()).toBeNull()
+
+      await repos.rewardRules.upsert(rule({ id: '_global', gameSlug: null, capPerHour: 400 }))
+      expect((await repos.rewardRules.findGlobal())?.capPerHour).toBe(400)
+    })
+
+    it('lists only active rules', async () => {
+      const repos = harness.repos()
+      await repos.rewardRules.upsert(rule({ id: 'poker' }))
+      await repos.rewardRules.upsert(rule({ id: 'retired', active: false }))
+
+      expect((await repos.rewardRules.listActive()).map((r) => r.id)).toEqual(['poker'])
+    })
+  })
+
+  describe('IMatchParticipantRepository — the claim s re-attribution (03 §6.1)', () => {
+    it('a guest with no participations rewrites nothing, and does not throw', async () => {
+      const repos = harness.repos()
+      const table = await makeTable(repos)
+      const guest = await makeGuest(repos, table.id)
+      const user = await makeUser(repos)
+
+      // The ordinary case: most claims happen mid-hand, before any
+      // `MatchResult` exists at all. The populated case needs rows only S36
+      // can create, and is asserted against the database in
+      // `tests/integration/wallet/guest-claim.test.ts`.
+      expect(await repos.participants.reattributeActor(guest.id, user.id)).toBe(0)
+      expect(await repos.participants.countByGuest(guest.id)).toBe(0)
+      expect(await repos.participants.countByUser(user.id)).toBe(0)
+    })
+  })
+
+  describe('IChatRepository — the claim s re-attribution (03 §6.1)', () => {
+    it('★ the guest s messages become the new user s messages', async () => {
+      const repos = harness.repos()
+      const table = await makeTable(repos)
+      const guest = await makeGuest(repos, table.id)
+      const other = await makeGuest(repos, table.id)
+      const user = await makeUser(repos)
+
+      const mine = await repos.chat.append({
+        tableId: table.id,
+        guestSessionId: guest.id,
+        body: 'nice trick',
+      })
+      const theirs = await repos.chat.append({
+        tableId: table.id,
+        guestSessionId: other.id,
+        body: 'thanks',
+      })
+
+      expect(await repos.chat.reattributeActor(guest.id, user.id)).toBe(1)
+
+      const rewritten = await repos.chat.findById(mine.id)
+      expect(rewritten?.userId).toBe(user.id)
+      expect(rewritten?.guestSessionId).toBeNull()
+      // Somebody else's message is untouched, which is the whole risk of an
+      // `updateMany` with a predicate.
+      expect((await repos.chat.findById(theirs.id))?.guestSessionId).toBe(other.id)
     })
   })
 

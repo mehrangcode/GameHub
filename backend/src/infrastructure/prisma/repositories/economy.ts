@@ -1,21 +1,26 @@
-import type { AssetCode } from '../../../contracts/enums.js'
-import type { Wallet } from '../../../domain/entities/economy.js'
+import type { AssetCode, TransactionKind } from '../../../contracts/enums.js'
+import type { RewardRule, Wallet } from '../../../domain/entities/economy.js'
 import type { WalletTransaction } from '../../../domain/entities/economy.js'
 import type { CosmeticItem, UserCosmetic } from '../../../domain/entities/user.js'
+import { GLOBAL_REWARD_RULE_ID } from '../../../domain/economy/caps.js'
 import { NotFoundError } from '../../../domain/errors/errors.js'
 import type {
   AppendResult,
   CosmeticFilter,
   ICosmeticRepository,
+  IRewardRuleRepository,
   IWalletRepository,
   LedgerEntry,
+  NewRewardRule,
 } from '../../../domain/repositories/economy.js'
 import type { PageQuery } from '../../../domain/repositories/IRepository.js'
 import type { IdentityRef } from '../../../domain/value-objects/identity.js'
 import { isUniqueViolation } from '../errors.js'
 import {
   toCosmeticItem,
+  toJson,
   toJsonOrNull,
+  toRewardRule,
   toUserCosmetic,
   toWallet,
   toWalletTransaction,
@@ -156,6 +161,46 @@ export class PrismaWalletRepository extends PrismaRepositoryBase implements IWal
     return result._sum.amount ?? 0
   }
 
+  async sumCreditsSince(
+    walletId: string,
+    since: Date,
+    kinds: readonly TransactionKind[],
+  ): Promise<number> {
+    const result = await this.db.walletTransaction.aggregate({
+      where: this.creditWindow(walletId, since, kinds),
+      _sum: { amount: true },
+    })
+    return result._sum.amount ?? 0
+  }
+
+  async countCreditsSince(
+    walletId: string,
+    since: Date,
+    kinds: readonly TransactionKind[],
+  ): Promise<number> {
+    return this.db.walletTransaction.count({
+      where: this.creditWindow(walletId, since, kinds),
+    })
+  }
+
+  /**
+   * `amount > 0` is the load-bearing clause: a cap window that netted debits
+   * against credits would let a player spend their way back under the daily
+   * limit and keep earning.
+   *
+   * `createdAt: { gte }` is a half-open window matching the sliding rate
+   * limiter's, so a row exactly on the boundary is counted once, by the newer
+   * window.
+   */
+  private creditWindow(walletId: string, since: Date, kinds: readonly TransactionKind[]) {
+    return {
+      walletId,
+      kind: { in: [...kinds] },
+      amount: { gt: 0 },
+      createdAt: { gte: since },
+    }
+  }
+
   async markVested(walletId: string): Promise<Wallet> {
     return this.mapMissing(
       async () =>
@@ -171,6 +216,55 @@ export class PrismaWalletRepository extends PrismaRepositoryBase implements IWal
     const wallet = await this.findById(transaction.walletId)
     if (!wallet) throw new NotFoundError('Wallet', { id: transaction.walletId })
     return { transaction, wallet, applied: false }
+  }
+}
+
+export class PrismaRewardRuleRepository
+  extends PrismaRepositoryBase
+  implements IRewardRuleRepository
+{
+  async upsert(rule: NewRewardRule & { id: string }): Promise<RewardRule> {
+    const { id, placement, repeatDecay, ...rest } = rule
+    const data = {
+      ...rest,
+      active: rule.active ?? true,
+      placementJson: toJson(placement),
+      repeatDecayJson: toJson(repeatDecay),
+    }
+    return toRewardRule(
+      await this.db.rewardRule.upsert({ where: { id }, create: { id, ...data }, update: data }),
+    )
+  }
+
+  async findById(id: string): Promise<RewardRule | null> {
+    const row = await this.db.rewardRule.findUnique({ where: { id } })
+    return row ? toRewardRule(row) : null
+  }
+
+  /**
+   * `slug:variant` first, then `slug` (Phase A's decision: `RewardRule.id` is
+   * free-form, so a variant needs no schema change). Two reads rather than one
+   * `in` query because the *order* is the rule — a variant row overrides its
+   * base rather than merging with it.
+   */
+  async findForGame(gameSlug: string, variant?: string): Promise<RewardRule | null> {
+    if (variant !== undefined) {
+      const specific = await this.findById(`${gameSlug}:${variant}`)
+      if (specific) return specific
+    }
+    return this.findById(gameSlug)
+  }
+
+  async findGlobal(): Promise<RewardRule | null> {
+    return this.findById(GLOBAL_REWARD_RULE_ID)
+  }
+
+  async listActive(): Promise<RewardRule[]> {
+    const rows = await this.db.rewardRule.findMany({
+      where: { active: true },
+      orderBy: { id: 'asc' },
+    })
+    return rows.map(toRewardRule)
   }
 }
 

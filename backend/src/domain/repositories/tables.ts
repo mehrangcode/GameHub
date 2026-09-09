@@ -93,4 +93,13 @@ export interface IChatRepository {
   /** Newest first, so a client can page backwards from the live tail. */
   listByTable(tableId: string, page?: PageQuery): Promise<ChatMessage[]>
   redact(id: string, at: Date): Promise<ChatMessage>
+  /**
+   * Claim transaction (03 §6.1 step 7): the guest's messages become the new
+   * user's messages. Returns the number of rows rewritten.
+   *
+   * Without this, the transcript of the hand a player just joined would keep
+   * addressing a guest session that no longer exists — and moderation (12 §6)
+   * would have no way to attribute what was said to the account that said it.
+   */
+  reattributeActor(guestSessionId: string, userId: string): Promise<number>
 }

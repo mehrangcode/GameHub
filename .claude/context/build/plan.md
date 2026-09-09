@@ -85,8 +85,11 @@ _Built and green (708 backend tests, up from 561). Awaiting Mehrang's "You verif
 
 ### Phase E — Wallet & the claim transaction
 
-- [ ] S21 Wallet credit path — derived idempotency, caps, `CAP_REJECTED`
-- [ ] S22 ⭐ Guest→user claim transaction, all 12 steps
+_Built and green (829 backend tests, up from 708). Awaiting Mehrang's "You verify" pass — see
+`context.md` for the exact commands._
+
+- [✅] S21 Wallet credit path — derived idempotency, caps, `CAP_REJECTED`
+- [✅] S22 ⭐ Guest→user claim transaction, all 12 steps
 
 ### Phase F — Sockets
 

@@ -100,6 +100,29 @@ export const GuestRequestSchema = z
 
 export type GuestRequest = z.infer<typeof GuestRequestSchema>
 
+/**
+ * ★ Journey J2 — the guest signs up mid-session (03 §6.1).
+ *
+ * There is **no `guestSessionId` field and no `tableId` field**, and that is the
+ * point. Which guest is being claimed comes from the `guest` cookie, and which
+ * table they are sent back to is decided by the same transaction that preserved
+ * their seat. A body that could name either would be a body that could claim
+ * someone else's seat and coins.
+ *
+ * `displayName` is optional because the guest already chose one when they
+ * joined; supplying it means "and while I'm here, change my name".
+ */
+export const GuestClaimRequestSchema = z
+  .object({
+    email: EmailSchema,
+    password: PasswordSchema,
+    displayName: DisplayNameSchema.optional(),
+    locale: LocaleSchema.optional(),
+  })
+  .strict()
+
+export type GuestClaimRequest = z.infer<typeof GuestClaimRequestSchema>
+
 // ── Responses ────────────────────────────────────────────────────────────────
 
 export const UserIdentitySchema = z.object({
@@ -153,3 +176,28 @@ export type AuthSessionResponse = z.infer<typeof AuthSessionResponseSchema>
 
 export const LogoutResponseSchema = z.object({ ok: z.literal(true) })
 export type LogoutResponse = z.infer<typeof LogoutResponseSchema>
+
+/**
+ * The claim's answer — 03 §6.1, 06 §3.1.
+ *
+ * `redirectTo` is **not nullable** here, unlike on `AuthSessionResponse`: a
+ * claimed guest always has a table, because a guest identity cannot exist
+ * without one. And it comes from the server, decided by the transaction that
+ * preserved the seat, so a client cannot drift to the wrong table by
+ * remembering a stale id.
+ *
+ * `vestedCoins` and `forfeitedCoins` are both reported because the sign-up
+ * pitch was "keep your coins" and the vesting cap can make that partly untrue
+ * (900 provisional → 500 vested). Telling the player which is which is the
+ * difference between a capped vest and a missing one.
+ */
+export const GuestClaimResponseSchema = z.object({
+  identity: UserIdentitySchema,
+  redirectTo: z.string(),
+  vestedCoins: z.number().int().nonnegative(),
+  forfeitedCoins: z.number().int().nonnegative(),
+  /** False only when the guest never actually sat down (spectator, or joined and left). */
+  seatPreserved: z.boolean(),
+})
+
+export type GuestClaimResponse = z.infer<typeof GuestClaimResponseSchema>

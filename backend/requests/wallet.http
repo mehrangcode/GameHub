@@ -1,0 +1,194 @@
+### Phase E — the wallet and the guest→user claim. Grown by S21 (credit path)
+### and S22 (journey J2).
+###
+### This file walks the one journey the whole product is built to make work:
+### a friend joins with no account, earns coins, and signs up **without leaving
+### the table** — keeping their seat and their coins, or neither.
+###
+### Before you start:
+###   npm run db:reset          # seeds the `_global` RewardRule the caps live on
+###   PORT=3999 npm run dev     # port 3000 is occupied on this machine
+###
+### And set the port to match:
+@host = http://localhost:3999
+@api = {{host}}/api/v1
+
+### ── the setup: a host, a table, an invite ───────────────────────────────────
+
+### @name register
+POST {{api}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "host@test.dev",
+  "password": "correct-horse-battery",
+  "displayName": "Mehrang"
+}
+
+### @name createTable
+POST {{api}}/tables
+Content-Type: application/json
+
+{ "gameSlug": "fixture", "seatCount": 4, "options": {} }
+
+@tableId = {{createTable.response.body.id}}
+
+### @name mintInvite
+POST {{api}}/tables/{{tableId}}/invites
+Content-Type: application/json
+
+{}
+
+@code = {{mintInvite.response.body.code}}
+
+### ── S22 · the guest joins ───────────────────────────────────────────────────
+
+### A guest identity, bound to this table and no other (S16). The `guest` cookie
+### that comes back is the only thing that says *which* guest — note that no
+### request below ever names a guest session id, and there is no field with
+### which it could.
+###
+### ⚠ A logged-in user MASKS a guest: `authenticate` resolves the `access`
+### cookie before the `guest` cookie (deliberately — a player who signed up
+### mid-session is a user now). So if your client shares one jar with the
+### register block above, clear it before this line, or run this file in a
+### second client.
+POST {{api}}/auth/guest
+Content-Type: application/json
+
+{ "inviteCode": "{{code}}", "displayName": "Sara" }
+
+### → { "kind": "guest", "tableId": "...", "expiresAt": "..." }
+GET {{api}}/auth/me
+Accept: application/json
+
+### ── S21 · the guest earns ───────────────────────────────────────────────────
+
+### There is no way to *earn* a coin before S36 settles a match, so grant some
+### from the shell — through `WalletService.credit`, not through an INSERT:
+###
+###   npx tsx scripts/dev-credit.ts --guest-cookie /tmp/g.txt --amount 120
+###
+### Then read it back. Dev-only route, deleted in S37 when the real
+### `GET /wallet` lands.
+###
+### → balance 120, status PROVISIONAL. That word is the whole signup pitch:
+###   the coins are real, they accrue while she plays, and she cannot spend
+###   them until she has an account (10 §2.2).
+GET {{api}}/_probe/wallet
+Accept: application/json
+
+### The statement, in the same payload. Every row carries `balanceAfter`, so a
+### statement renders without the client ever adding anything up — and a
+### `CAP_REJECTED` row with `amount: 0` is a *deliberate* row: the audit of a
+### reward that was earned and then capped away (10 §2.3).
+###
+### To see one, spend the hourly budget first:
+###   npx tsx scripts/dev-credit.ts --guest-cookie /tmp/g.txt --amount 400
+### then settle a match once S36 exists. Until then the caps are exercised by
+### `tests/unit/wallet/caps.test.ts`, where the boundaries are cheap to reach.
+
+### ── S22 · ★ the claim ───────────────────────────────────────────────────────
+
+### Before you send this, note the `TableMember` row in `npm run db:studio`:
+### its **id**, `seat`, `team` and `joinedAt`. Those four values are the test.
+###
+### The body names no table and no guest session — only credentials. Which
+### guest is being upgraded comes from the cookie; which table she lands back
+### on is decided by the same transaction that preserved her seat, and comes
+### back as `redirectTo` (06 §3.1).
+POST {{api}}/auth/guest/claim
+Content-Type: application/json
+
+{
+  "email": "sara@test.dev",
+  "password": "correct-horse-battery"
+}
+
+### → 201 {
+###      "identity": { "kind": "user", ... },
+###      "redirectTo": "/table/...",     ← from the server, not remembered
+###      "vestedCoins": 120,
+###      "forfeitedCoins": 0,
+###      "seatPreserved": true
+###    }
+###
+### Now go back to Studio. The `TableMember` row must have the **same id**,
+### the same `seat`, the same `team` and the same `joinedAt` — with `userId`
+### set and `guestSessionId` null. That row keeping its identity is the whole
+### trick: no seat was vacated, so from the other players' point of view
+### nothing happened except a name badge losing its "guest" marker.
+
+### → vested 120, and all three assets, because a user holds COIN, GEM and
+###   TICKET from the moment the account exists (10 §2.1).
+GET {{api}}/_probe/wallet
+Accept: application/json
+
+### In Studio, the ledger tells the same story from both sides:
+###   guest wallet:  +120 MATCH_REWARD, −120 GUEST_VEST  → balance 0, VESTED
+###   user  wallet:  +120 GUEST_VEST                     → balance 120
+### Σ across both is 120, unchanged. Coins were **moved**, never conjured (E1),
+### and both halves share one derived key: `vest:{guestSessionId}`.
+
+### ── the guest token is dead ─────────────────────────────────────────────────
+
+### Send this with the *guest* cookie still in the jar.
+### → 401. Not merely "cannot claim twice": the cookie no longer authenticates
+###   at all, so it is not a second, weaker credential for the account's seat.
+GET {{api}}/auth/me
+Accept: application/json
+
+### → 401 again, and no second account. `GuestSession.claimedAt` is set and the
+###   row is kept forever — it is the audit link between the two identities.
+POST {{api}}/auth/guest/claim
+Content-Type: application/json
+
+{
+  "email": "someone-else@test.dev",
+  "password": "correct-horse-battery"
+}
+
+### ── the vesting cap ─────────────────────────────────────────────────────────
+
+### Repeat the journey with a richer guest to see the cap bite:
+###
+###   npx tsx scripts/dev-credit.ts --guest-cookie /tmp/g2.txt --amount 900
+###   # then claim
+###
+### → { "vestedCoins": 500, "forfeitedCoins": 400 }
+###
+### And in the ledger, a `GUEST_FORFEIT` row for −400 with
+### `reason: "GUEST_VEST_CAP"`. The remainder is *explained*, not merely
+### missing — which is the difference between a bounded incentive (10 §3.4)
+### and a bug report.
+
+### ── the boundary (P7) ───────────────────────────────────────────────────────
+
+### → 400 VALIDATION_FAILED. `tableId` is the field somebody will eventually
+###   try to add here, and it must be refused rather than ignored: a claim that
+###   accepted a table id would be a claim that could take another table's seat.
+POST {{api}}/auth/guest/claim
+Content-Type: application/json
+
+{
+  "email": "sara2@test.dev",
+  "password": "correct-horse-battery",
+  "tableId": "somewhere-else"
+}
+
+### → 400, with `fieldErrors.password: ["errors.passwordTooShort"]`. An i18n
+###   key, never an English sentence (02 §5.6).
+POST {{api}}/auth/guest/claim
+Content-Type: application/json
+
+{ "email": "sara3@test.dev", "password": "short" }
+
+### → 409 EMAIL_TAKEN, and **nothing** moved: no user, no seat change, no vest.
+###   The first of the four failure modes 03 §6.1 names.
+POST {{api}}/auth/guest/claim
+Content-Type: application/json
+
+{
+  "email": "host@test.dev",
+  "password": "correct-horse-battery"
+}

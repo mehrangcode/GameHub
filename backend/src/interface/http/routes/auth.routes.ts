@@ -2,15 +2,18 @@ import { Router, type Request } from 'express'
 import type { Container } from '../../../container.js'
 import {
   AUTH_COOKIES,
+  GuestClaimRequestSchema,
   GuestRequestSchema,
   LoginRequestSchema,
   RegisterRequestSchema,
+  type GuestClaimRequest,
   type GuestRequest,
   type LoginRequest,
   type RegisterRequest,
 } from '../../../contracts/dto/auth.js'
 import {
   clearAuthCookies,
+  clearGuestCookie,
   setAccessCookie,
   setGuestCookie,
   setRefreshCookie,
@@ -35,7 +38,7 @@ import { validBody, zodValidate } from '../middleware/validate.js'
  */
 export function buildAuthRouter(container: Container): Router {
   const router = Router()
-  const { auth, guests, env, rateLimiter } = container
+  const { auth, guests, guestClaims, env, rateLimiter } = container
 
   /**
    * A tighter limit than the global one on the three endpoints that create
@@ -107,6 +110,47 @@ export function buildAuthRouter(container: Container): Router {
       const issued = await guests.create(validBody<GuestRequest>(req), contextOf(req))
       setGuestCookie(res, issued.guestToken, env)
       res.status(201).json({ identity: issued.identity, redirectTo: issued.redirectTo })
+    }),
+  )
+
+  /**
+   * ★ Journey J2 — the guest signs up without leaving the table (S22).
+   *
+   * **No `requireIdentity()`, deliberately.** `authenticate` resolves the
+   * `access` cookie *before* the `guest` cookie, so a browser holding both
+   * (someone who signed in on another tab, or a stale cookie from an earlier
+   * session) presents as a user and `req.identity` would never be the guest
+   * being claimed. Reading the cookie directly is the only way this endpoint
+   * is about the *guest*, and it is why the service refuses rather than the
+   * middleware.
+   *
+   * Rate-limited with the other account-creating routes: it mints a user and
+   * burns an argon2 hash exactly as `/auth/register` does.
+   */
+  router.post(
+    '/auth/guest/claim',
+    creationLimit,
+    zodValidate({ body: GuestClaimRequestSchema }),
+    asyncHandler(async (req, res) => {
+      const claimed = await guestClaims.claim(
+        cookie(req, AUTH_COOKIES.guest),
+        validBody<GuestClaimRequest>(req),
+        contextOf(req),
+      )
+
+      setAccessCookie(res, claimed.accessToken, env)
+      setRefreshCookie(res, claimed.refreshToken, env)
+      // The guest session is dead server-side; leaving the cookie in the jar
+      // would leave the browser sending a credential that can only be refused.
+      clearGuestCookie(res, env)
+
+      res.status(201).json({
+        identity: claimed.identity,
+        redirectTo: claimed.redirectTo,
+        vestedCoins: claimed.vestedCoins,
+        forfeitedCoins: claimed.forfeitedCoins,
+        seatPreserved: claimed.seatPreserved,
+      })
     }),
   )
 

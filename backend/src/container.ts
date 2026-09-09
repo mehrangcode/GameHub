@@ -3,12 +3,14 @@ import type { Logger } from 'pino'
 import type { IRateLimiter } from './application/ports/rateLimiter.js'
 import { AuthService } from './application/services/AuthService.js'
 import { GameCatalogService } from './application/services/GameCatalogService.js'
+import { GuestClaimService } from './application/services/GuestClaimService.js'
 import { GuestSessionService } from './application/services/GuestSessionService.js'
 import { InviteService } from './application/services/InviteService.js'
 import { LoginThrottle } from './application/services/LoginThrottle.js'
 import { MetricsRegistry } from './application/services/MetricsRegistry.js'
 import { SecurityEventService } from './application/services/SecurityEventService.js'
 import { TableService } from './application/services/TableService.js'
+import { WalletService } from './application/services/WalletService.js'
 import type { Env } from './config/env.js'
 import { getEnv } from './config/env.js'
 import { buildGameRegistry, type GameRegistry } from './domain/games/registry.js'
@@ -51,6 +53,16 @@ export interface Container {
   readonly security: SecurityEventService
   readonly auth: AuthService
   readonly guests: GuestSessionService
+
+  /**
+   * S21 — the ledger. Every credit in the platform goes through this one
+   * object: the settlement path (S36), the daily bonus, achievements, the
+   * premium grant and the admin adjustment all call `credit`, so the caps and
+   * the idempotency rule cannot be bypassed by adding a new earn source.
+   */
+  readonly wallets: WalletService
+  /** S22 — journey J2, in one transaction. */
+  readonly guestClaims: GuestClaimService
 
   /**
    * S17 — the catalog. `registry` is the domain's list of games and is what
@@ -112,6 +124,20 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
     logger,
   })
 
+  const wallets = new WalletService({ uow, repos, metrics, logger })
+
+  const guestClaims = new GuestClaimService({
+    uow,
+    repos,
+    guests,
+    wallets,
+    hasher,
+    tokens,
+    security,
+    metrics,
+    logger,
+  })
+
   /**
    * `fixture` is registered outside production only (11 §1.1). The flag is read
    * from `env` rather than from `process.env` so a test can build a production
@@ -143,6 +169,8 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
     security,
     auth,
     guests,
+    wallets,
+    guestClaims,
     registry,
     catalog,
     tables,

@@ -127,11 +127,36 @@ describe.each(REPO_HARNESSES)('[$name] identity repositories', (harness) => {
       const user = await makeUser(repos)
       const at = new Date('2026-02-02T10:00:00.000Z')
 
-      const claimed = await repos.guests.markClaimed(guest.id, user.id, at)
-      expect(claimed.claimedByUserId).toBe(user.id)
-      expect(claimed.claimedAt?.toISOString()).toBe(at.toISOString())
+      const claimed = await repos.guests.claimIfUnclaimed(guest.id, user.id, at)
+      expect(claimed?.claimedByUserId).toBe(user.id)
+      expect(claimed?.claimedAt?.toISOString()).toBe(at.toISOString())
       // The row survives — a claimed guest is history, not a deletion.
       expect(await repos.guests.findById(guest.id)).not.toBeNull()
+    })
+
+    it('★ a second claim of the same session loses, and changes nothing', async () => {
+      const repos = harness.repos()
+      const table = await makeTable(repos)
+      const guest = await makeGuest(repos, table.id)
+      const [first, second] = [await makeUser(repos), await makeUser(repos)]
+      const at = new Date('2026-02-02T10:00:00.000Z')
+
+      expect(await repos.guests.claimIfUnclaimed(guest.id, first.id, at)).not.toBeNull()
+      // This is what makes S22 race-safe: the loser gets null and unwinds its
+      // whole transaction rather than overwriting the winner's attribution.
+      expect(
+        await repos.guests.claimIfUnclaimed(guest.id, second.id, new Date(at.getTime() + 1000)),
+      ).toBeNull()
+
+      const settled = await repos.guests.findById(guest.id)
+      expect(settled?.claimedByUserId).toBe(first.id)
+      expect(settled?.claimedAt?.toISOString()).toBe(at.toISOString())
+    })
+
+    it('claiming an unknown session is null, not a throw', async () => {
+      const repos = harness.repos()
+      const user = await makeUser(repos)
+      expect(await repos.guests.claimIfUnclaimed('no-such-guest', user.id, new Date())).toBeNull()
     })
 
     it('deletes only sessions that have actually expired', async () => {

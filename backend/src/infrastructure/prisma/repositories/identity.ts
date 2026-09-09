@@ -130,18 +130,21 @@ export class PrismaGuestSessionRepository
     await this.mapMissing(() => this.db.guestSession.delete({ where: { id } }), 'GuestSession', id)
   }
 
-  async markClaimed(id: string, userId: string, at: Date): Promise<GuestSession> {
-    return this.mapMissing(
-      async () =>
-        toGuestSession(
-          await this.db.guestSession.update({
-            where: { id },
-            data: { claimedAt: at, claimedByUserId: userId },
-          }),
-        ),
-      'GuestSession',
-      id,
-    )
+  /**
+   * ★ A conditional claim, not a read-then-write.
+   *
+   * `updateMany` with `claimedAt: null` in the predicate makes the database
+   * decide who wins, exactly as `revokeIfActive` does for refresh rotation.
+   * `count === 0` means the session was already claimed — by a concurrent
+   * request, or by an earlier one whose token is being replayed — and the
+   * caller's whole transaction must unwind.
+   */
+  async claimIfUnclaimed(id: string, userId: string, at: Date): Promise<GuestSession | null> {
+    const { count } = await this.db.guestSession.updateMany({
+      where: { id, claimedAt: null },
+      data: { claimedAt: at, claimedByUserId: userId },
+    })
+    return count === 0 ? null : this.findById(id)
   }
 
   async deleteExpired(now: Date): Promise<number> {

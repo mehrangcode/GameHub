@@ -1,7 +1,12 @@
 import type { PrismaClient } from '@prisma/client'
 import type { IUnitOfWork, Repositories } from '../../domain/repositories/Repositories.js'
 import type { Db } from './mappers.js'
-import { PrismaCosmeticRepository, PrismaWalletRepository } from './repositories/economy.js'
+import {
+  PrismaCosmeticRepository,
+  PrismaRewardRuleRepository,
+  PrismaWalletRepository,
+} from './repositories/economy.js'
+import { PrismaMatchParticipantRepository } from './repositories/matches.js'
 import {
   PrismaGameEventRepository,
   PrismaGameInstanceRepository,
@@ -42,8 +47,10 @@ export function buildRepositories(db: Db): Repositories {
     events: new PrismaGameEventRepository(db),
     snapshots: new PrismaGameSnapshotRepository(db),
     stats: new PrismaStatsRepository(db),
+    participants: new PrismaMatchParticipantRepository(db),
 
     wallets: new PrismaWalletRepository(db),
+    rewardRules: new PrismaRewardRuleRepository(db),
     cosmetics: new PrismaCosmeticRepository(db),
   }
 }

@@ -289,4 +289,12 @@ export class PrismaChatRepository extends PrismaRepositoryBase implements IChatR
       id,
     )
   }
+
+  async reattributeActor(guestSessionId: string, userId: string): Promise<number> {
+    const { count } = await this.db.chatMessage.updateMany({
+      where: { guestSessionId },
+      data: { userId, guestSessionId: null },
+    })
+    return count
+  }
 }

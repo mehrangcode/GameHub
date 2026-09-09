@@ -22,7 +22,12 @@ import type {
   UserStatus,
   WalletStatus,
 } from '../../contracts/enums.js'
-import type { Wallet, WalletTransaction } from '../../domain/entities/economy.js'
+import type {
+  PlacementTable,
+  RewardRule,
+  Wallet,
+  WalletTransaction,
+} from '../../domain/entities/economy.js'
 import type {
   GameEvent,
   GameInstance,
@@ -202,5 +207,15 @@ export function toWalletTransaction(row: Rows.WalletTransaction): WalletTransact
     ...row,
     assetCode: row.assetCode as AssetCode,
     kind: row.kind as TransactionKind,
+  }
+}
+
+export function toRewardRule(row: Rows.RewardRule): RewardRule {
+  const { placementJson, repeatDecayJson, ...rest } = row
+  return {
+    ...rest,
+    assetCode: row.assetCode as AssetCode,
+    placement: parseJson<PlacementTable>(placementJson),
+    repeatDecay: parseJson<number[]>(repeatDecayJson),
   }
 }

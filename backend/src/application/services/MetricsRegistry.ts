@@ -44,6 +44,19 @@ export const COUNTERS = [
   'invites_resolved',
   'invite_resolve_failures',
   'invite_resolve_rate_limited',
+
+  // Phase E. `wallet_credits_replayed` is the one worth watching: it counts
+  // idempotency keys that collided, which is the mechanism working — a spike
+  // means something upstream is retrying, and a *zero* forever probably means
+  // the keys stopped being derived.
+  'wallet_credits',
+  'wallet_credits_replayed',
+  'wallet_caps_rejected',
+  'wallet_caps_partial',
+  'guest_claims',
+  'guest_claims_failed',
+  'coins_vested',
+  'coins_forfeited',
 ] as const
 
 /** Point-in-time values that go up and down. */
