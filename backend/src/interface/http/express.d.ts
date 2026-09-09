@@ -1,4 +1,5 @@
 import type { Identity } from '../../contracts/dto/auth.js'
+import type { Table } from '../../domain/entities/table.js'
 
 /**
  * The two things middleware attaches to a request.
@@ -28,6 +29,14 @@ declare global {
        * so this is optional rather than a nullable field nobody checks.
        */
       identity?: Identity
+
+      /**
+       * Set by `requireHost` (access level **H**), which had to read the table
+       * to check ownership. The handler then reuses it instead of issuing the
+       * same query again — one read per request, and no window in which the
+       * row the guard approved differs from the row the handler edits.
+       */
+      table?: Table
     }
   }
 }

@@ -4,7 +4,7 @@
 Mehrang has verified himself.
 
 **Full session catalog:** [`Documents/11-build-plan.md`](../../../Documents/11-build-plan.md).
-This file is the roadmap checklist only — the *why*, *what to build*, *tests*, and *how you verify*
+This file is the roadmap checklist only — the _why_, _what to build_, _tests_, and _how you verify_
 for each session live in that document. Do not duplicate them here.
 
 **Milestone authority:** [`Documents/08-roadmap.md`](../../../Documents/08-roadmap.md).
@@ -40,44 +40,56 @@ From `08-roadmap.md` M0 exit criteria. All of these must be true before M1 start
 Tick when **Mehrang** has run the session's "You verify" steps, not when the code compiles.
 
 ### Phase A — Foundations
-*Built and green (90 backend + 18 frontend tests). Awaiting Mehrang's "You verify" pass — see
-`context.md` for the exact commands and the two caveats.*
-- [ ] S01 Backend scaffold, TS strict, the three load-bearing lint rules
-- [ ] S02 Frontend scaffold, Vite proxy, route stubs
-- [ ] S03 `contracts/` + `contracts:sync` / `contracts:check`
-- [ ] S04 Prisma schema I — identity, tables, seats, invites
-- [ ] S05 Prisma schema II — games, chat, results, cosmetics, economy
-- [ ] S06 Idempotent seed script
+
+_Built and green (90 backend + 18 frontend tests). Awaiting Mehrang's "You verify" pass — see
+`context.md` for the exact commands and the two caveats._
+
+- [✅] S01 Backend scaffold, TS strict, the three load-bearing lint rules
+- [✅] S02 Frontend scaffold, Vite proxy, route stubs
+- [✅] S03 `contracts/` + `contracts:sync` / `contracts:check`
+- [✅] S04 Prisma schema I — identity, tables, seats, invites
+- [✅] S05 Prisma schema II — games, chat, results, cosmetics, economy
+- [✅] S06 Idempotent seed script
 
 ### Phase B — Domain & persistence
-*Built and green (392 backend tests, up from 90). Awaiting Mehrang's "You verify" pass — see
-`context.md` for the exact commands.*
-- [ ] S07 Value objects, entities, `AppError` taxonomy
-- [ ] S08 Repository interfaces + in-memory fakes
-- [ ] S09 Prisma repositories + `UnitOfWork`
-- [ ] S10 `container.ts`, `app.ts`, Pino redaction, `/health` + `/ready`
+
+_Built and green (392 backend tests, up from 90). Awaiting Mehrang's "You verify" pass — see
+`context.md` for the exact commands._
+
+- [✅] S07 Value objects, entities, `AppError` taxonomy
+- [✅] S08 Repository interfaces + in-memory fakes
+- [✅] S09 Prisma repositories + `UnitOfWork`
+- [✅] S10 `container.ts`, `app.ts`, Pino redaction, `/health` + `/ready`
 
 ### Phase C — Auth
-*Built and green (561 backend tests, up from 392). Awaiting Mehrang's "You verify" pass — see
-`context.md` for the exact commands and the one `npm install` caveat.*
-- [ ] S11 argon2id + JWT + cookie helpers
-- [ ] S12 Zod validation, error middleware, helmet, CORS, rate limit
-- [ ] S13 `POST /auth/register`, `/auth/login`, `GET /auth/me`
-- [ ] S14 Refresh rotation with family revocation + `/auth/logout`
-- [ ] S15 `SecurityEvent` audit log + metrics registry (no HTTP route — moved to S49)
-- [ ] S16 Table-bound guest tokens — `POST /auth/guest`
+
+_Built and green (561 backend tests, up from 392). Awaiting Mehrang's "You verify" pass — see
+`context.md` for the exact commands and the one `npm install` caveat._
+
+- [✅] S11 argon2id + JWT + cookie helpers
+- [✅] S12 Zod validation, error middleware, helmet, CORS, rate limit
+- [✅] S13 `POST /auth/register`, `/auth/login`, `GET /auth/me`
+- [✅] S14 Refresh rotation with family revocation + `/auth/logout`
+- [✅] S15 `SecurityEvent` audit log + metrics registry (no HTTP route — moved to S49)
+- [✅] S16 Table-bound guest tokens — `POST /auth/guest`
 
 ### Phase D — Tables & invites
-- [ ] S17 Game registry + `GET /games`, `/games/:slug`
-- [ ] S18 Table CRUD
-- [ ] S19 Invites — mint, revoke, `GET /invites/:code` unauthenticated
-- [ ] S20 Seat claim/release, race-safe by unique constraint
+
+_Built and green (708 backend tests, up from 561). Awaiting Mehrang's "You verify" pass — see
+`context.md` for the exact commands._
+
+- [✅] S17 Game registry + `GET /games`, `/games/:slug`
+- [✅] S18 Table CRUD
+- [✅] S19 Invites — mint, revoke, `GET /invites/:code` unauthenticated
+- [✅] S20 Seat claim/release, race-safe by unique constraint
 
 ### Phase E — Wallet & the claim transaction
+
 - [ ] S21 Wallet credit path — derived idempotency, caps, `CAP_REJECTED`
 - [ ] S22 ⭐ Guest→user claim transaction, all 12 steps
 
 ### Phase F — Sockets
+
 - [ ] S23 Socket.IO gateway, handshake identity, `dev-socket.ts`
 - [ ] S24 Room model, `table:join`, `table:snapshot`, seat broadcast
 - [ ] S25 Presence, heartbeat, disconnect grace
@@ -85,23 +97,27 @@ Tick when **Mehrang** has run the session's "You verify" steps, not when the cod
 - [ ] S27 Redis adapter, presence sets, rate limits, fallback
 
 ### Phase G — Event log
+
 - [ ] S28 `GameInstance` + seed commitment + `GameEvent` append with `seq`
 - [ ] S29 Snapshot policy, `rebuildState`, delta/full resync
 - [ ] S30 The `_fixture` engine + `GameSessionService` move pipeline
 
 ### Phase H — Turn enforcement
+
 - [ ] S31 `TurnTimerService` — absolute deadlines, `game:turnTimer`
 - [ ] S32 Warning, strike ladder, default action, `strikesResetOnAction`
 - [ ] S33 Ejection + bot substitution
 - [ ] S34 Seat reclamation + timer re-arming on restart
 
 ### Phase I — Rewards
+
 - [ ] S35 `RewardService.compute` — the pure policy function
 - [ ] S36 ⭐ Settlement transaction — per-seat, idempotent, forfeiture
 - [ ] S37 `GET /wallet`, `/wallet/transactions`, `wallet:updated`
 - [ ] S38 Debit path with row lock, `GUEST_FORFEIT`, nightly reconciliation
 
 ### Phase J — Frontend
+
 - [ ] S39 Axios instance, single-flight refresh, `authStore`, login/register
 - [ ] S40 `tokens.css`, `themeStore`, i18n en+fa, `dir` switching
 - [ ] S41 Welcome page — registry-driven preview cards
@@ -110,11 +126,13 @@ Tick when **Mehrang** has run the session's "You verify" steps, not when the cod
 - [ ] S44 `TableShell` — seats, presence, chat, countdown ring, nudge
 
 ### Phase K — Ship
+
 - [ ] S45 Dockerfiles + dev compose + CI for both projects
 - [ ] S46 Prod compose, Caddy, Postgres migration, VPS deploy
 - [ ] S47 ⭐ M0 exit-criteria walkthrough + tested backup restore
 
 ### Phase L — Admin spine (`Documents/12-admin-console.md` §11.1)
+
 - [ ] S48 Admin schema + `admin-main.ts` + the three isolation guards
 - [ ] S49 Admin auth: TOTP, forced enrollment, step-up, sessions
 - [ ] S50 ⭐ The `withAudit` spine + first read endpoints + M0's admin gate

@@ -1,17 +1,36 @@
 import { Router } from 'express'
 import { z } from 'zod'
-import type { GuestSessionService } from '../../../application/services/GuestSessionService.js'
-import { enforceGuestBinding, requireIdentity } from '../middleware/authorize.js'
-import { validBody, zodValidate } from '../middleware/validate.js'
+import type { Container } from '../../../container.js'
+import { ClaimSeatRequestSchema, type ClaimSeatRequest } from '../../../contracts/dto/tables.js'
+import { botRef } from '../../../domain/value-objects/identity.js'
+import type { OccupantRef } from '../../../domain/value-objects/identity.js'
+import { enforceGuestBinding, identityRefOf, requireIdentity } from '../middleware/authorize.js'
+import { asyncHandler } from '../middleware/error.js'
+import { validBody, validParams, zodValidate } from '../middleware/validate.js'
 
 /**
- * A route that exists purely so the boundary's behaviour can be *seen*
- * (11-build-plan.md S12).
+ * Routes that exist so a behaviour can be *seen* from `curl`, mounted only
+ * when `NODE_ENV !== 'production'`.
  *
- * Mounted only when `NODE_ENV !== 'production'`. It is not a health check and
- * not an example endpoint — its schema is deliberately picky so that one `curl`
- * demonstrates each guarantee: a required field, a refusal to coerce `"5"` into
- * `5`, and rejection of an unknown key.
+ * Two different jobs live here:
+ *
+ *   1. `POST /_probe` (S12) — a deliberately picky schema, so one request
+ *      demonstrates each boundary guarantee: a required field, a refusal to
+ *      coerce `"5"` into `5`, and rejection of an unknown key.
+ *   2. `/_probe/tables/:id/seats` (S20) — seat claim and release over HTTP.
+ *
+ * **The seat routes are temporary and dated.** Seat changes are socket
+ * traffic: if a friend at the table would watch it happen, it goes over the
+ * socket (02 §3.1), and `02` §5's REST surface deliberately lists no seat
+ * routes. But S20's concurrency work lands four sessions before the gateway,
+ * and "claim seat 1 as your user, then as the guest → 409" is a check worth
+ * being able to run by hand. So the *service* is the real deliverable and these
+ * are a window onto it, to be **deleted in S24** once `table:takeSeat` calls
+ * the very same `TableService.claimSeat`.
+ *
+ * S16's `/_probe/table/:tableId` is gone: `GET /tables/:id` now carries
+ * `enforceGuestBinding` itself, so the cross-table 403 and its
+ * `SEAT_IMPERSONATION` row are observable on the real route.
  */
 export const ProbeRequestSchema = z
   .object({
@@ -23,32 +42,91 @@ export const ProbeRequestSchema = z
 
 export type ProbeRequest = z.infer<typeof ProbeRequestSchema>
 
-export function buildProbeRouter(guests: GuestSessionService): Router {
+/**
+ * A path segment is always a string, so coercion here is required rather than
+ * sloppy — the no-coercion rule (P7) is about *bodies*, where `"5"` means the
+ * client has a bug.
+ */
+const SeatPathParamsSchema = z.object({
+  id: z.string().min(1).max(64),
+  seat: z.coerce.number().int().min(0).max(9),
+})
+
+type SeatPathParams = z.infer<typeof SeatPathParamsSchema>
+
+const TableIdOnlySchema = z.object({ id: z.string().min(1).max(64) })
+type TableIdOnly = z.infer<typeof TableIdOnlySchema>
+
+export function buildProbeRouter(container: Container): Router {
   const router = Router()
+  const { tables, guests } = container
 
   router.post('/_probe', zodValidate({ body: ProbeRequestSchema }), (req, res) => {
-    const body = validBody<ProbeRequest>(req)
-    res.json({ ok: true, echo: body })
+    res.json({ ok: true, echo: validBody<ProbeRequest>(req) })
   })
 
-  /**
-   * The guest-binding guard, made observable before `/tables/:id` exists.
-   *
-   * S16's verification step wants to see a guest token refused against another
-   * table with its own eyes, but the real table route arrives in S18. Rather
-   * than leave the session's central property unverifiable for two sessions,
-   * this stands in: same middleware, same 403, same `SEAT_IMPERSONATION` row.
-   * When S18 lands, `/tables/:id` inherits `enforceGuestBinding` and this can
-   * go — it is dev-only, so no production surface ever depended on it.
-   */
-  router.get(
-    '/_probe/table/:tableId',
-    requireIdentity(),
-    enforceGuestBinding(guests),
-    (req, res) => {
-      res.json({ ok: true, tableId: req.params.tableId, identity: req.identity })
-    },
+  /** Everything table-scoped below is guest-bound, exactly as the real routes are. */
+  const atTable = [requireIdentity(), enforceGuestBinding(guests)] as const
+
+  router.post(
+    '/_probe/tables/:id/seats',
+    ...atTable,
+    zodValidate({ params: TableIdOnlySchema, body: ClaimSeatRequestSchema }),
+    asyncHandler(async (req, res) => {
+      const { id } = validParams<TableIdOnly>(req)
+      const body = validBody<ClaimSeatRequest>(req)
+      const actor = await actorFor(container, id, req.identity!)
+
+      // ★ Seat identity comes from the authenticated caller, never from the
+      // payload. A body may say which *seat* it wants; it can never say who is
+      // sitting in it. Only the host may name a bot as the occupant, which the
+      // service enforces.
+      const occupant: OccupantRef = body.asBot === undefined ? actor.identity : botRef(body.asBot)
+
+      res.status(201).json(await tables.claimSeat(id, body.seat, occupant, actor))
+    }),
+  )
+
+  router.delete(
+    '/_probe/tables/:id/seats/:seat',
+    ...atTable,
+    zodValidate({ params: SeatPathParamsSchema }),
+    asyncHandler(async (req, res) => {
+      const { id, seat } = validParams<SeatPathParams>(req)
+      const actor = await actorFor(container, id, req.identity!)
+      res.json(await tables.releaseSeat(id, seat, actor))
+    }),
+  )
+
+  router.post(
+    '/_probe/tables/:id/spectators',
+    ...atTable,
+    zodValidate({ params: TableIdOnlySchema }),
+    asyncHandler(async (req, res) => {
+      const { id } = validParams<TableIdOnly>(req)
+      const ref = identityRefOf(req.identity!)
+      res.status(201).json(await tables.joinAsSpectator(id, ref, ref))
+    }),
   )
 
   return router
+}
+
+/**
+ * Resolves "who is asking, and are they the host" in one read.
+ *
+ * `isHost` is what separates *taking a seat* from *seating a bot* and *kicking
+ * someone*; it is derived from the table row, never from the request.
+ */
+async function actorFor(
+  container: Container,
+  tableId: string,
+  identity: NonNullable<Awaited<ReturnType<() => Express.Request['identity']>>>,
+) {
+  const table = await container.tables.require(tableId)
+  const ref = identityRefOf(identity)
+  return {
+    identity: ref,
+    isHost: ref.kind === 'user' && table.hostUserId === ref.userId,
+  }
 }

@@ -178,13 +178,14 @@ Accept: application/json
 ### below. → 403 GUEST_TABLE_BINDING, plus an ALERT SEAT_IMPERSONATION row in
 ### SecurityEvent.
 ###
-### `/_probe/table/:tableId` is a dev-only stand-in so this is checkable now;
-### `/tables/:id` inherits the same `enforceGuestBinding` middleware in S18.
-GET {{api}}/_probe/table/PASTE_A_DIFFERENT_TABLE_ID
+### Since S18 this runs against the real route: `GET /tables/:id` carries the
+### same `enforceGuestBinding` middleware, so the dev-only `/_probe/table/:id`
+### stand-in is gone. `requests/tables.http` mints a second table for you.
+GET {{api}}/tables/PASTE_A_DIFFERENT_TABLE_ID
 Accept: application/json
 
-### The guest's own table → 200.
-GET {{api}}/_probe/table/PASTE_THE_BOUND_TABLE_ID
+### The guest's own table → 200, with the seat map.
+GET {{api}}/tables/PASTE_THE_BOUND_TABLE_ID
 Accept: application/json
 
 ### Unknown, expired and revoked codes are deliberately indistinguishable —

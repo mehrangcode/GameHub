@@ -70,6 +70,20 @@ export const EnvSchema = z.object({
   LOGIN_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
   LOGIN_WINDOW_SEC: z.coerce.number().int().positive().default(900),
 
+  /**
+   * How long a minted invite link stays usable (S19). A day covers "we're
+   * playing tonight" without leaving a live join capability in a chat log for
+   * a month; the host may ask for anything up to 30 days per link.
+   */
+  INVITE_TTL_HOURS: z.coerce.number().int().min(1).max(720).default(24),
+  /**
+   * Per-IP budget for `GET /invites/:code`, which is public and therefore the
+   * one endpoint someone can spray codes at (07 §5.2). Generous enough that a
+   * pre-join screen reloading is never throttled.
+   */
+  INVITE_RESOLVE_MAX: z.coerce.number().int().positive().default(30),
+  INVITE_RESOLVE_WINDOW_SEC: z.coerce.number().int().positive().default(60),
+
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 
   SEED_ADMIN_EMAIL: z.string().email().default('admin@local.dev'),

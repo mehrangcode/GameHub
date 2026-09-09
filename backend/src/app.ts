@@ -10,8 +10,11 @@ import { rateLimit } from './interface/http/middleware/rateLimit.js'
 import { corsPolicy, securityHeaders } from './interface/http/middleware/security.js'
 import { REQUEST_ID_HEADER, requestId } from './interface/http/middleware/requestId.js'
 import { buildAuthRouter } from './interface/http/routes/auth.routes.js'
+import { buildGamesRouter } from './interface/http/routes/games.routes.js'
 import { buildHealthRouter } from './interface/http/routes/health.routes.js'
+import { buildInvitesRouter } from './interface/http/routes/invites.routes.js'
 import { buildProbeRouter } from './interface/http/routes/probe.routes.js'
+import { buildTablesRouter } from './interface/http/routes/tables.routes.js'
 
 /** Liveness and readiness are exempt from the global limiter — see below. */
 const PROBE_PATH = /^(\/api\/v1)?\/(health|ready)$/
@@ -99,10 +102,17 @@ export function buildApp(container: Container): Express {
   app.use(health)
   app.use(API_PREFIX, health)
   app.use(API_PREFIX, buildAuthRouter(container))
+  app.use(API_PREFIX, buildGamesRouter(container))
+  app.use(API_PREFIX, buildTablesRouter(container))
+  // `/invites/:code` is its own router because it is the one table-adjacent
+  // route with no authentication at all — keeping it out of the tables router
+  // means nobody can add a `requireIdentity()` to that file and silently break
+  // the invite link (S19).
+  app.use(API_PREFIX, buildInvitesRouter(container))
 
-  // Dev-only: the boundary's behaviour, made visible to curl (S12, S16).
+  // Dev-only: the boundary's behaviour, made visible to curl (S12, S20).
   if (env.NODE_ENV !== 'production') {
-    app.use(API_PREFIX, buildProbeRouter(container.guests))
+    app.use(API_PREFIX, buildProbeRouter(container))
   }
 
   // ── Tail ──────────────────────────────────────────────────────────────────

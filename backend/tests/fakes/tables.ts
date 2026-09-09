@@ -110,6 +110,7 @@ export class InMemoryTableRepository implements ITableRepository {
     tableId: string,
     seat: SeatId,
     occupant: OccupantRef,
+    team: number | null = null,
   ): Promise<TableMember | null> {
     const taken = this.members.all().some((m) => m.tableId === tableId && m.seat === seat)
     if (taken) return null
@@ -131,7 +132,7 @@ export class InMemoryTableRepository implements ITableRepository {
       tableId,
       seat,
       role: 'PLAYER',
-      team: null,
+      team,
       joinedAt: new Date(),
       leftAt: null,
       disconnectedAt: null,

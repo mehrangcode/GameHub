@@ -29,6 +29,21 @@ export const COUNTERS = [
   'guest_sessions_created',
   'token_reuse_detected',
   'security_events',
+
+  // Phase D. `invite_resolve_failures` counts the one refusal the *caller* is
+  // told nothing about (07 §5.2): revoked, expired, exhausted and unknown all
+  // answer identically, so this counter and the `INVITE_ABUSE` rows are the
+  // only place the difference between "a friend reloaded a dead link" and
+  // "someone is spraying codes" is visible at all.
+  'tables_created',
+  'tables_closed',
+  'seats_claimed',
+  'seats_released',
+  'invites_minted',
+  'invites_revoked',
+  'invites_resolved',
+  'invite_resolve_failures',
+  'invite_resolve_rate_limited',
 ] as const
 
 /** Point-in-time values that go up and down. */

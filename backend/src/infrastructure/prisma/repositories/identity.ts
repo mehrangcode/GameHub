@@ -47,6 +47,12 @@ export class PrismaUserRepository extends PrismaRepositoryBase implements IUserR
     return row ? toUser(row) : null
   }
 
+  async findManyByIds(ids: readonly string[]): Promise<User[]> {
+    if (ids.length === 0) return []
+    const rows = await this.db.user.findMany({ where: { id: { in: [...ids] } } })
+    return rows.map(toUser)
+  }
+
   async update(id: string, data: Partial<User>): Promise<User> {
     return this.mapMissing(
       async () => toUser(await this.db.user.update({ where: { id }, data })),
@@ -96,6 +102,12 @@ export class PrismaGuestSessionRepository
       where: { tableId },
       orderBy: { createdAt: 'asc' },
     })
+    return rows.map(toGuestSession)
+  }
+
+  async findManyByIds(ids: readonly string[]): Promise<GuestSession[]> {
+    if (ids.length === 0) return []
+    const rows = await this.db.guestSession.findMany({ where: { id: { in: [...ids] } } })
     return rows.map(toGuestSession)
   }
 

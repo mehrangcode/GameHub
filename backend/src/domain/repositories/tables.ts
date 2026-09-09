@@ -37,8 +37,17 @@ export interface ITableRepository extends IRepository<Table> {
    * outcome of two friends clicking at once, not an exception. There is no
    * `SELECT` first: a check-then-insert is wrong under concurrency (03 §6.3),
    * and the contract suite proves this implementation is not.
+   *
+   * `team` is written in the *same* insert rather than by a follow-up update:
+   * for a partnership game the team is part of who you are at that table, and a
+   * second write could fail and leave a seated player on no team.
    */
-  claimSeat(tableId: string, seat: SeatId, occupant: OccupantRef): Promise<TableMember | null>
+  claimSeat(
+    tableId: string,
+    seat: SeatId,
+    occupant: OccupantRef,
+    team?: number | null,
+  ): Promise<TableMember | null>
   releaseSeat(tableId: string, seat: SeatId): Promise<void>
 
   /** Spectators carry `seat: null`, so any number of them coexist. */

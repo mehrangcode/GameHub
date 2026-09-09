@@ -55,6 +55,11 @@ export class InMemoryUserRepository implements IUserRepository {
     return this.rows.find((u) => u.email === email)
   }
 
+  async findManyByIds(ids: readonly string[]): Promise<User[]> {
+    const wanted = new Set(ids)
+    return this.rows.filter((u) => wanted.has(u.id))
+  }
+
   async update(id: string, data: Partial<User>): Promise<User> {
     return this.rows.patch(id, { ...data, updatedAt: new Date() })
   }
@@ -98,6 +103,11 @@ export class InMemoryGuestSessionRepository implements IGuestSessionRepository {
 
   async listByTable(tableId: string): Promise<GuestSession[]> {
     return this.rows.filter((g) => g.tableId === tableId)
+  }
+
+  async findManyByIds(ids: readonly string[]): Promise<GuestSession[]> {
+    const wanted = new Set(ids)
+    return this.rows.filter((g) => wanted.has(g.id))
   }
 
   async update(id: string, data: Partial<GuestSession>): Promise<GuestSession> {

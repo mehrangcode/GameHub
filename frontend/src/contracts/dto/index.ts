@@ -3,3 +3,6 @@
 
 export * from './common.js'
 export * from './auth.js'
+export * from './games.js'
+export * from './tables.js'
+export * from './invites.js'

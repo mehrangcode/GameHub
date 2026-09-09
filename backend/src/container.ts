@@ -2,18 +2,23 @@ import type { PrismaClient } from '@prisma/client'
 import type { Logger } from 'pino'
 import type { IRateLimiter } from './application/ports/rateLimiter.js'
 import { AuthService } from './application/services/AuthService.js'
+import { GameCatalogService } from './application/services/GameCatalogService.js'
 import { GuestSessionService } from './application/services/GuestSessionService.js'
+import { InviteService } from './application/services/InviteService.js'
 import { LoginThrottle } from './application/services/LoginThrottle.js'
 import { MetricsRegistry } from './application/services/MetricsRegistry.js'
 import { SecurityEventService } from './application/services/SecurityEventService.js'
+import { TableService } from './application/services/TableService.js'
 import type { Env } from './config/env.js'
 import { getEnv } from './config/env.js'
+import { buildGameRegistry, type GameRegistry } from './domain/games/registry.js'
 import type { IUnitOfWork, Repositories } from './domain/repositories/Repositories.js'
 import {
   Argon2PasswordHasher,
   HmacGuestTokenIssuer,
   JwtTokenIssuer,
 } from './infrastructure/auth/adapters.js'
+import { RandomInviteCodeGenerator } from './infrastructure/invites/inviteCode.js'
 import { getLogger } from './infrastructure/logger.js'
 import { prisma as defaultPrisma } from './infrastructure/prisma/client.js'
 import { checkDatabase, type DependencyStatus } from './infrastructure/prisma/health.js'
@@ -46,6 +51,17 @@ export interface Container {
   readonly security: SecurityEventService
   readonly auth: AuthService
   readonly guests: GuestSessionService
+
+  /**
+   * S17 — the catalog. `registry` is the domain's list of games and is what
+   * S30 hangs engines off; `catalog` is what the API is allowed to say about
+   * them. Both are exposed because the socket gateway (S24) needs the registry
+   * directly, while every REST route wants the mapped view.
+   */
+  readonly registry: GameRegistry
+  readonly catalog: GameCatalogService
+  readonly tables: TableService
+  readonly invites: InviteService
 
   /** Powers `/ready`. Redis joins the report in S27. */
   readonly checkReadiness: () => Promise<{ database: DependencyStatus }>
@@ -96,6 +112,26 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
     logger,
   })
 
+  /**
+   * `fixture` is registered outside production only (11 §1.1). The flag is read
+   * from `env` rather than from `process.env` so a test can build a production
+   * container and assert the dev game is genuinely absent.
+   */
+  const registry = buildGameRegistry({ includeDevGames: env.NODE_ENV !== 'production' })
+  const catalog = new GameCatalogService(registry)
+
+  const tables = new TableService({ repos, catalog, security, metrics, logger })
+
+  const invites = new InviteService({
+    repos,
+    registry,
+    codes: new RandomInviteCodeGenerator(),
+    security,
+    metrics,
+    logger,
+    defaultTtlHours: env.INVITE_TTL_HOURS,
+  })
+
   return {
     env,
     logger,
@@ -107,6 +143,10 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
     security,
     auth,
     guests,
+    registry,
+    catalog,
+    tables,
+    invites,
     checkReadiness: async () => ({ database: await checkDatabase(prisma) }),
     shutdown: async () => {
       rateLimiter.dispose()

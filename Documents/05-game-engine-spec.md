@@ -34,6 +34,17 @@ export interface GameMeta {
   /** Zod schema for per-table options (target score, blinds, difficulty, ...) */
   optionsSchema: ZodType<unknown>
   defaultOptions: unknown
+  /**
+   * Announced but not yet playable: the welcome page greys the preview card out
+   * and `POST /tables` refuses the slug.
+   *
+   * Declared rather than derived from "has an engine registered", because those
+   * are not the same claim — an engine can exist and pass its unit tests while
+   * the renderer, the reward rule or the bot is still missing. Each milestone
+   * flips its own game's flag as the last step of shipping it, so going live is
+   * a decision someone makes rather than a side effect of a file appearing.
+   */
+  comingSoon: boolean
   /** Preview-card data for the welcome page. i18n keys, never literal text. */
   preview: {
     nameKey: string

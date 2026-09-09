@@ -217,21 +217,31 @@ describe('a guest identity on GET /auth/me', () => {
   })
 })
 
+/**
+ * S16's property, asserted on the **real** route from S18 onwards.
+ *
+ * These three cases used to run against a dev-only `/_probe/table/:tableId`,
+ * which existed for exactly two sessions because S16 landed before there was
+ * any table route to guard. `GET /tables/:id` now carries
+ * `enforceGuestBinding` itself, so the cross-table 403 and its audit row are
+ * observable on the endpoint a browser actually calls — which is the whole
+ * reason the stand-in was marked for deletion here.
+ */
 describe('★ the guest binding, enforced on every request (07 §3)', () => {
   it('lets a guest reach its own table', async () => {
     const created = await joinAs('Sara')
     const res = await request(app)
-      .get(`/api/v1/_probe/table/${tableId}`)
+      .get(`/api/v1/tables/${tableId}`)
       .set('Cookie', guestCookie(created))
 
     expect(res.status).toBe(200)
-    expect(res.body.identity.kind).toBe('guest')
+    expect(res.body.id).toBe(tableId)
   })
 
   it('★ refuses another table with 403 — and audits it', async () => {
     const created = await joinAs('Sara')
     const res = await request(app)
-      .get(`/api/v1/_probe/table/${otherTableId}`)
+      .get(`/api/v1/tables/${otherTableId}`)
       .set('Cookie', guestCookie(created))
 
     // The core assertion of S16. A leaked guest token is worth exactly one
@@ -259,14 +269,15 @@ describe('★ the guest binding, enforced on every request (07 §3)', () => {
         .find((c) => c.startsWith(`${AUTH_COOKIES.access}=`))
         ?.split(';')[0] ?? ''
 
-    // A real account is not table-bound; whether it may see this table is
-    // membership and host logic, which arrives with S18.
+    // A real account is not table-bound: the table id is a cuid and therefore
+    // the capability, exactly as the invite code is (S18). Whether they may
+    // *act* at the table is host and membership logic, not this guard.
     expect(
-      (await request(app).get(`/api/v1/_probe/table/${otherTableId}`).set('Cookie', access)).status,
+      (await request(app).get(`/api/v1/tables/${otherTableId}`).set('Cookie', access)).status,
     ).toBe(200)
 
     // Anonymous is still 401 — the guard is about binding, not authentication.
-    expect((await request(app).get(`/api/v1/_probe/table/${otherTableId}`)).status).toBe(401)
+    expect((await request(app).get(`/api/v1/tables/${otherTableId}`)).status).toBe(401)
   })
 })
 

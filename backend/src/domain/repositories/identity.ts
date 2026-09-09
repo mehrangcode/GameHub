@@ -33,6 +33,16 @@ export interface IUserRepository extends IRepository<User> {
   create(data: NewUser): Promise<User>
   /** Emails are stored already-normalised; this is an exact match. */
   findByEmail(email: string): Promise<User | null>
+  /**
+   * Batch lookup for display names — a table's seat map, an invite's host, a
+   * match's participants (S18).
+   *
+   * Exists so rendering a four-seat table costs one query instead of four, and
+   * so the N+1 is impossible rather than merely discouraged. Missing ids are
+   * simply absent from the result; the caller decides whether that is an error,
+   * because for a seat map it is not (a deleted account leaves an empty seat).
+   */
+  findManyByIds(ids: readonly string[]): Promise<User[]>
   touchLastSeen(id: string, at: Date): Promise<void>
 }
 
@@ -45,6 +55,8 @@ export interface IGuestSessionRepository extends IRepository<GuestSession> {
   create(data: NewGuestSession): Promise<GuestSession>
   findByTokenHash(tokenHash: string): Promise<GuestSession | null>
   listByTable(tableId: string): Promise<GuestSession[]>
+  /** Batch lookup for seat-map display names, exactly as {@link IUserRepository.findManyByIds}. */
+  findManyByIds(ids: readonly string[]): Promise<GuestSession[]>
   /**
    * Step of the claim transaction (03 §7). The row is kept forever for audit
    * and is never reused — a claimed guest token must stop working.

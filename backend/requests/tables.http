@@ -1,0 +1,276 @@
+### Phase D — the game catalog, tables, invites and seats. Grown by S17
+### (games), S18 (table CRUD), S19 (invites), S20 (seats).
+###
+### Run `requests/auth.http` first, at least as far as the register block: every
+### table route below needs the `access` cookie it leaves in your client's jar.
+### As in that file, no X-CSRF-Token header appears anywhere: the double-submit
+### token is only demanded from requests that carry an `Origin`, and a REST
+### client sends none (07 §5.4).
+
+@host = http://localhost:3000
+@api = {{host}}/api/v1
+
+### ── S17 · the catalog ───────────────────────────────────────────────────────
+
+### The endpoint the welcome page is built from. → the five v1 games, every one
+### `comingSoon: true` at M0.
+###
+### Read the payload for what is NOT there: no `name`, no `tagline`, no English
+### anywhere — only `nameKey`/`taglineKey`. The client owns language (02 §8.1),
+### which is what lets the same response render in Persian. `fixture` is absent
+### too: it is registered in dev but never advertised.
+GET {{api}}/games
+Accept: application/json
+
+### One game, with everything the create-table form needs — including
+### `optionsSchema`, JSON Schema derived from the engine's own Zod schema, so
+### the form and the validator cannot drift.
+GET {{api}}/games/shelem
+Accept: application/json
+
+### The dev-only test game. → 200 here, and a 404 in production that is
+### byte-identical (but for the slug you typed) to a game that never existed.
+GET {{api}}/games/fixture
+Accept: application/json
+
+### → 404 NOT_FOUND. `errors.notFound`, never a rendered English sentence.
+GET {{api}}/games/nope
+Accept: application/json
+
+### ── S18 · table lifecycle ───────────────────────────────────────────────────
+
+### Create a table. → 201 with the full seat map.
+###
+### Note what did NOT happen: you are not seated. Sitting down is a separate act
+### with its own authorization and its own race (S20), and a host auto-seated at
+### seat 0 could never then choose seat 2 — one identity holds one seat per
+### table.
+###
+### `options` comes back post-parse, defaults filled in, and that is what is
+### stored: the row records the options the game will actually be played with.
+# @name createTable
+POST {{api}}/tables
+Content-Type: application/json
+
+{
+  "gameSlug": "fixture",
+  "seatCount": 4,
+  "options": { "target": 3 }
+}
+
+@tableId = {{createTable.response.body.id}}
+
+### → 400 with `fieldErrors["options.target"]: ["errors.field.tooBig"]`, and no
+### table row. The engine's own schema is the gate, so a game added later needs
+### no change here.
+POST {{api}}/tables
+Content-Type: application/json
+
+{
+  "gameSlug": "fixture",
+  "seatCount": 4,
+  "options": { "target": 999 }
+}
+
+### → 400 `errors.seatCountNotPlayable`, with `details.playableCounts` telling
+### the form which counts to offer instead.
+POST {{api}}/tables
+Content-Type: application/json
+
+{
+  "gameSlug": "fixture",
+  "seatCount": 1,
+  "options": {}
+}
+
+### → 400 `errors.gameComingSoon`. Announced is not playable, and the catalog
+### flag is what says so — no second list of "real" games to keep in sync.
+POST {{api}}/tables
+Content-Type: application/json
+
+{
+  "gameSlug": "shelem",
+  "seatCount": 4,
+  "options": {}
+}
+
+### The table you just made. → 200, metadata plus the seat map.
+###
+### ★ Read this response for the transport rule (02 §3.1): there is no `state`,
+### no `deck`, no `hand`, no `turn`, no `legalMoves`. Cards travel over the
+### socket, projected once per viewer — REST carries the table *before* play.
+GET {{api}}/tables/{{tableId}}
+Accept: application/json
+
+### The resume list — tables you host or are seated at, open ones only.
+GET {{api}}/tables/mine
+Accept: application/json
+
+### Host-only edit, and `WAITING`-only. → 200 with the new seat count.
+PATCH {{api}}/tables/{{tableId}}
+Content-Type: application/json
+
+{
+  "seatCount": 2,
+  "options": { "target": 5 }
+}
+
+### Put it back to four seats before the seat blocks below.
+PATCH {{api}}/tables/{{tableId}}
+Content-Type: application/json
+
+{
+  "seatCount": 4
+}
+
+### → 400 `errors.emptyPatch`. "Change nothing" almost always means the client
+### sent the wrong field name, and a 200 would hide that.
+PATCH {{api}}/tables/{{tableId}}
+Content-Type: application/json
+
+{}
+
+### ── S19 · invites ───────────────────────────────────────────────────────────
+
+### Mint a link. No body needed — "all defaults" is the common case.
+###
+### `joinPath` is `/t/<code>`: the server owns the link shape, so changing it
+### later is one edit rather than a grep through the client.
+# @name mintInvite
+POST {{api}}/tables/{{tableId}}/invites
+Content-Type: application/json
+
+{}
+
+@code = {{mintInvite.response.body.code}}
+
+### A link with a life and a use budget of its own.
+POST {{api}}/tables/{{tableId}}/invites
+Content-Type: application/json
+
+{
+  "expiresInHours": 2,
+  "maxUses": 3
+}
+
+### Every link at this table, newest first. Host only.
+GET {{api}}/tables/{{tableId}}/invites
+Accept: application/json
+
+### ★ THE point of S19, and it is easiest to prove in a *private window* or with
+### `curl` and no cookie jar: this route takes no authentication at all.
+###
+### The friend opening your link has an empty cookie jar. If this endpoint asked
+### who they were, journey J1→J2 would die right here and a thirty-second join
+### would become a signup funnel.
+###
+### Read the payload for what it withholds: no table id, no host user id, no
+### email, no options, no game state — only the game (as an i18n key), the
+### host's display name, and whether there is room.
+GET {{api}}/invites/{{code}}
+Accept: application/json
+
+### Revoke it. A tombstone, not a delete: the row stays, and the guests who
+### joined through it keep pointing at it.
+DELETE {{api}}/tables/{{tableId}}/invites/{{code}}
+
+### → 410 INVITE_EXPIRED. Now compare it with the next block.
+GET {{api}}/invites/{{code}}
+Accept: application/json
+
+### ★ A code that never existed → the SAME 410, byte for byte. Revoked, expired,
+### exhausted, dangling and unknown are one answer, because any difference
+### between them turns this route into an oracle for enumerating live codes
+### (07 §5.2). The reason is recorded in the `INVITE_ABUSE` audit row instead,
+### where it is useful and invisible to whoever supplied the code.
+GET {{api}}/invites/TOTALFAKE
+Accept: application/json
+
+### Spray a few of those, then look at SecurityEvent in Studio: one
+### `INVITE_ABUSE` row per attempt, and a 429 with `retryAfterMs` once you pass
+### `INVITE_RESOLVE_MAX` (30/min) — this route's own budget, tighter than the
+### global one because it is the only public endpoint taking a guessable secret.
+GET {{api}}/invites/ALSOFAKE
+Accept: application/json
+
+### ── S20 · seats ─────────────────────────────────────────────────────────────
+
+### ⚠ These three routes are a dev-only window onto `TableService`, deleted in
+### S24. Seat changes are socket traffic — if a friend at the table would watch
+### it happen, it goes over the socket (02 §3.1) — but S20's concurrency work
+### lands four sessions before the gateway, and "claim it twice → 409" is worth
+### being able to run by hand. `table:takeSeat` will call the very same service.
+
+### Take seat 1. → 201 with the seat map; seat 1 now has `isSelf: true`.
+###
+### ★ The seat is in the body; the *occupant* never is. Identity comes from your
+### cookie (and from the socket, from S24), so no payload can claim to be
+### someone else. Try adding `"userId": "..."` — it is a 400, because the schema
+### is `.strict()` and there is no such field to send.
+POST {{api}}/_probe/tables/{{tableId}}/seats
+Content-Type: application/json
+
+{
+  "seat": 1
+}
+
+### The same seat again → 409 SEAT_TAKEN with `details.reason: ALREADY_SEATED`
+### and `yourSeat: 1`. A different seat gets the same 409 — one identity, one
+### seat per table.
+POST {{api}}/_probe/tables/{{tableId}}/seats
+Content-Type: application/json
+
+{
+  "seat": 2
+}
+
+### Fill a seat with a bot. Host only — `HOST_REQUIRED` for anyone else.
+POST {{api}}/_probe/tables/{{tableId}}/seats
+Content-Type: application/json
+
+{
+  "seat": 3,
+  "asBot": "easy"
+}
+
+### Watch instead of playing. Spectators carry `seat: null`, which is exactly
+### why any number of them coexist: the `(tableId, seat)` unique constraint
+### treats NULLs as distinct on both SQLite and Postgres.
+POST {{api}}/_probe/tables/{{tableId}}/spectators
+Content-Type: application/json
+
+{}
+
+### Stand up. While `WAITING` the row goes and the seat is free again.
+###
+### ★ Do this again after a match starts and the behaviour deliberately flips:
+### `IN_PROGRESS` keeps the row and stamps `disconnectedAt`, because the seat
+### belongs to the match now — it holds your cards, your chips and your reward
+### eligibility (04 §5.2). Vacating it would delete a hand mid-play.
+DELETE {{api}}/_probe/tables/{{tableId}}/seats/1
+
+### ── The seat race ───────────────────────────────────────────────────────────
+###
+### You cannot click two buttons in the same millisecond, so the headline check
+### of S20 is test-only by nature:
+###
+###   npx vitest run tests/integration/seat-claim.test.ts --reporter=verbose
+###
+### Read "★ two claims on the same seat: exactly one wins". There is no "is the
+### seat free?" read anywhere in the claim path — the insert goes in and the
+### unique constraint decides (03 §6.3), which is the only arrangement that
+### stays correct when both callers look at the same instant.
+
+### ── Closing ─────────────────────────────────────────────────────────────────
+
+### Host only. → 204, and in Studio the row is `CLOSED` with `closedAt` set —
+### never deleted. The event log, the match results and the ledger rows all
+### reference this table, and a cascade would erase the history that pays
+### people.
+DELETE {{api}}/tables/{{tableId}}
+
+### → 409 on the closed table: no new invites for a table nobody can join.
+POST {{api}}/tables/{{tableId}}/invites
+Content-Type: application/json
+
+{}

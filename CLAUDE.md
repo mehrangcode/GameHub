@@ -79,6 +79,13 @@ Tests use **Vitest** everywhere (`npx vitest run path/to/file.test.ts` for a sin
 `-t "name"` for a single test). Backend integration adds Supertest + `socket.io-client`; E2E is
 Playwright in `frontend/e2e/` and `admin-frontend/e2e/`.
 
+`postman/` holds a hand-maintained collection of the REST surface plus a local environment, for
+importing into Postman. **Every session that adds or changes a route must extend it and run it** —
+`npx newman run postman/Template.postman_collection.json -e postman/Template.local.postman_environment.json`
+against a live API — as part of the session, not afterwards. One folder per phase, an assertion on
+every request. `.claude/context/build/context.md` has the how-to (including why `npm run dev` cannot
+serve it from WSL) and the guest-cookie trap.
+
 ## Architecture
 
 ### Layers (backend) — dependencies point inward only

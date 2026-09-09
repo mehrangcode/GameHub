@@ -114,10 +114,11 @@ export class PrismaTableRepository extends PrismaRepositoryBase implements ITabl
     tableId: string,
     seat: SeatId,
     occupant: OccupantRef,
+    team: number | null = null,
   ): Promise<TableMember | null> {
     const row = await this.nullOnConflict(() =>
       this.db.tableMember.create({
-        data: { tableId, seat, role: 'PLAYER', ...occupantFields(occupant) },
+        data: { tableId, seat, team, role: 'PLAYER', ...occupantFields(occupant) },
       }),
     )
     return row ? toTableMember(row) : null
