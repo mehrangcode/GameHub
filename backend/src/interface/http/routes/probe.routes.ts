@@ -23,14 +23,25 @@ import { validBody, validParams, zodValidate } from '../middleware/validate.js'
  *   3. `GET /_probe/wallet` (S21) — a balance to read, until S37 ships the real
  *      `GET /wallet`.
  *
- * **The seat routes are temporary and dated.** Seat changes are socket
- * traffic: if a friend at the table would watch it happen, it goes over the
- * socket (02 §3.1), and `02` §5's REST surface deliberately lists no seat
- * routes. But S20's concurrency work lands four sessions before the gateway,
- * and "claim seat 1 as your user, then as the guest → 409" is a check worth
- * being able to run by hand. So the *service* is the real deliverable and these
- * are a window onto it, to be **deleted in S24** once `table:takeSeat` calls
- * the very same `TableService.claimSeat`.
+ * **The seat routes were dated for deletion in S24, and are deliberately kept.**
+ *
+ * S24 shipped `table:takeSeat`, which calls the very same
+ * `TableService.claimSeat`, so the original reason to remove these — a second
+ * way to do one thing — now applies. They stay anyway, for one concrete reason
+ * that only became visible after the Postman collection was written:
+ *
+ *   **Newman cannot speak Socket.IO.** Folder `07 Wallet & the claim` sets a
+ *   guest into seat 2 and then asserts, after the claim, that `memberId` and
+ *   `joinedAt` are unchanged — the single assertion that distinguishes a seat
+ *   that was *updated* from one that was deleted and recreated, and therefore
+ *   the headline check of journey J2 (S22). Deleting these routes would delete
+ *   that coverage and leave nothing able to replace it over REST.
+ *
+ * The duplication is real but narrow: both paths call one method, so they
+ * cannot disagree about the rules, and this router is still mounted only when
+ * `NODE_ENV !== 'production'`. Re-dated for **S37**, alongside `/_probe/wallet`
+ * — by then `GET /wallet` exists and the claim journey can be verified without
+ * a seat-setting side door.
  *
  * S16's `/_probe/table/:tableId` is gone: `GET /tables/:id` now carries
  * `enforceGuestBinding` itself, so the cross-table 403 and its

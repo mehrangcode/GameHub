@@ -57,6 +57,32 @@ export const COUNTERS = [
   'guest_claims_failed',
   'coins_vested',
   'coins_forfeited',
+
+  // Phase F. Three of these answer questions nothing else can:
+  //
+  //   `socket_handshake_rejected` is the only visible trace of somebody trying
+  //   cookies that do not work — a legitimate client retries at most twice.
+  //
+  //   `socket_identity_spoof_attempts` counts inbound payloads carrying a
+  //   `userId`/`seat`/`playerId` field. It should sit at exactly zero forever:
+  //   our own clients never send one, so any movement at all is either a
+  //   probe or a bug we introduced, and both are worth a look.
+  //
+  //   `presence_grace_expired` is the population S33 will start ejecting. Its
+  //   ratio to `reconnects` is the honest answer to "is the grace window long
+  //   enough?", which is otherwise a guess.
+  'socket_connections',
+  'socket_handshake_rejected',
+  'socket_identity_spoof_attempts',
+  'socket_events_rejected',
+  'socket_rate_limited',
+  'socket_evicted_oldest',
+  'table_joins',
+  'presence_grace_expired',
+  'chat_messages',
+  'chat_emotes',
+  'chat_rate_limited',
+  'redis_degraded',
 ] as const
 
 /** Point-in-time values that go up and down. */

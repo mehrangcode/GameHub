@@ -14,6 +14,7 @@ import {
   ValidationError,
 } from '../../domain/errors/errors.js'
 import type { Repositories } from '../../domain/repositories/Repositories.js'
+import { tableRoom, type IRealtimePublisher } from '../ports/realtime.js'
 import type { IdentityRef, OccupantRef } from '../../domain/value-objects/identity.js'
 import { seatId, teamOf, type SeatId } from '../../domain/value-objects/seat.js'
 import {
@@ -61,6 +62,17 @@ export interface TableServiceDeps {
   readonly metrics: MetricsRegistry
   readonly logger: Logger
   readonly now?: () => Date
+  /**
+   * S24, optional. Only `close` broadcasts from in here — every *seat* change
+   * is announced by the socket handler that made it, which is the layer that
+   * knows which socket to exclude and which system message to write.
+   *
+   * Closing is different because it is the one table transition that happens
+   * over **REST** (`DELETE /tables/:id`), so nothing on the socket side would
+   * otherwise notice. Without this, a host who closes a table from another tab
+   * leaves everyone else looking at a lobby that no longer exists.
+   */
+  readonly realtime?: IRealtimePublisher
 }
 
 /** Who is asking, and what they may do beyond their own seat. */
@@ -183,6 +195,12 @@ export class TableService {
       status: 'CLOSED',
       closedAt: this.now(),
     })
+
+    this.deps.realtime?.publish(tableRoom(tableId), 'table:statusChanged', {
+      tableId,
+      status: 'CLOSED',
+    })
+
     this.deps.metrics.increment('tables_closed')
     this.deps.logger.info({ tableId }, 'table closed')
   }
@@ -394,10 +412,24 @@ export class TableService {
   async directory(
     table: Table | null,
     members: readonly TableMember[],
+    /**
+     * Ids that need a name but hold no member row.
+     *
+     * The case that forced this: a host who joins the lobby and has not sat
+     * down yet is not a `TableMember` at all, so their chat lines rendered with
+     * `displayName: null` — an unnamed message from the person who created the
+     * table. Anyone who has *spoken* needs resolving, whether or not they are
+     * sitting.
+     */
+    extra: { userIds?: readonly string[]; guestSessionIds?: readonly string[] } = {},
   ): Promise<OccupantDirectory> {
     const { userIds, guestSessionIds } = occupantIdsOf(members)
     if (table?.hostUserId != null && !userIds.includes(table.hostUserId)) {
       userIds.push(table.hostUserId)
+    }
+    for (const id of extra.userIds ?? []) if (!userIds.includes(id)) userIds.push(id)
+    for (const id of extra.guestSessionIds ?? []) {
+      if (!guestSessionIds.includes(id)) guestSessionIds.push(id)
     }
 
     const [users, guests] = await Promise.all([

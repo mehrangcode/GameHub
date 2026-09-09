@@ -541,7 +541,16 @@ describe('POST /auth/guest/claim — refusals', () => {
 
     expect(res.status).toBe(401)
     expect(await db.user.count()).toBe(1)
-    expect(await db.securityEvent.count({ where: { kind: 'BAD_TOKEN' } })).toBeGreaterThanOrEqual(1)
+
+    // Polled, not read once. `SecurityEventService.record` is deliberately
+    // fire-and-forget — an audit failure must never fail the audited request
+    // (07 §6) — so the insert is *scheduled* before the 401 is written and may
+    // land after it. Reading straight after the response asserts a synchrony
+    // the service explicitly does not promise, and the resulting flake reads as
+    // "auditing is broken" rather than as a test that raced.
+    await expect
+      .poll(() => db.securityEvent.count({ where: { kind: 'BAD_TOKEN' } }))
+      .toBeGreaterThanOrEqual(1)
   })
 
   it('with a forged guest cookie: 401, no user, no oracle', async () => {

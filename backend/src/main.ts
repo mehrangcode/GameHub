@@ -1,7 +1,10 @@
+import { createServer } from 'node:http'
 import { buildApp } from './app.js'
 import { APP_VERSION } from './config/constants.js'
 import { loadEnv } from './config/env.js'
 import { buildContainer } from './container.js'
+import { PROTOCOL_VERSION } from './contracts/events.js'
+import { createGateway } from './interface/socket/gateway.js'
 
 // P7: the environment is parsed before anything else is constructed. A bad
 // value exits here, not halfway through a request.
@@ -10,9 +13,27 @@ const env = loadEnv()
 const container = buildContainer({ env })
 const app = buildApp(container)
 
-const server = app.listen(env.PORT, () => {
+/**
+ * One HTTP server, two protocols (S23).
+ *
+ * The server is created explicitly rather than by `app.listen()` because
+ * Socket.IO has to attach to it: `/socket.io/*` is intercepted before Express
+ * ever sees the request, and everything else falls through to the Express app.
+ * Sharing the port is what lets the Vite dev proxy forward `/api` and
+ * `/socket.io` to the same origin, and — more importantly in production — what
+ * lets the browser send the same cookie jar to both.
+ */
+const server = createServer(app)
+const gateway = createGateway({ httpServer: server, container })
+
+server.listen(env.PORT, () => {
   container.logger.info(
-    { port: env.PORT, nodeEnv: env.NODE_ENV, version: APP_VERSION },
+    {
+      port: env.PORT,
+      nodeEnv: env.NODE_ENV,
+      version: APP_VERSION,
+      protocolVersion: PROTOCOL_VERSION,
+    },
     'api listening',
   )
 })
@@ -44,9 +65,11 @@ server.on('error', (error: NodeJS.ErrnoException) => {
 })
 
 /**
- * Drain in the right order: stop accepting connections, finish what is in
- * flight, then close the database. Disconnecting Prisma first would fail the
- * requests we are trying to let finish.
+ * Drain in the right order: stop accepting sockets, then stop accepting
+ * requests, finish what is in flight, then close the database. Disconnecting
+ * Prisma first would fail the requests we are trying to let finish, and closing
+ * the HTTP server before the gateway would leave open WebSockets holding it
+ * open past the timeout.
  */
 let shuttingDown = false
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
@@ -55,11 +78,13 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     shuttingDown = true
     container.logger.info({ signal }, 'shutting down')
 
-    server.close(() => {
-      void container.shutdown().then(
-        () => process.exit(0),
-        () => process.exit(1),
-      )
+    void gateway.close().finally(() => {
+      server.close(() => {
+        void container.shutdown().then(
+          () => process.exit(0),
+          () => process.exit(1),
+        )
+      })
     })
   })
 }

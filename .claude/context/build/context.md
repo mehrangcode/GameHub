@@ -7,37 +7,111 @@
 | | |
 |---|---|
 | **Milestone** | M0 — Platform Skeleton |
-| **Last session completed** | **S01–S22 (Phases A + B + C + D + E) built and green — not yet verified by Mehrang** |
-| **Next session** | **S23 — Socket.IO gateway, handshake identity, `dev-socket.ts`** (3 h, 🔌) — starts Phase F |
+| **Last session completed** | **S01–S27 (Phases A + B + C + D + E + F) built and green — not yet verified by Mehrang** |
+| **Next session** | **S28 — `GameInstance` + seed commitment + `GameEvent` append with `seq`** (3 h, 🧪) — starts Phase G |
 | **Blocked on** | Nothing in code. The two older environment items only (port 3000, Playwright deps) |
-| **Repo state** | `backend/` and `frontend/` exist. **829 backend tests**, 18 frontend tests, all green. No `admin-frontend/` (MA) |
+| **Repo state** | `backend/` and `frontend/` exist. **1338 backend tests**, 18 frontend tests. No `admin-frontend/` (MA) |
 
-Session spec for S23: `Documents/11-build-plan.md` §8.
+Session spec for S28: `Documents/11-build-plan.md` §9.
 
-**S23 needs two new dependencies** — `socket.io` and (for `scripts/dev-socket.ts`)
-`socket.io-client`. That is the first `npm install` since Phase C, so re-read the platform note at
-the bottom of this file first: whichever OS runs it owns the tree, and **`npm run db:generate` must
-follow it** or every DB-touching test fails with a missing Prisma engine.
+## ⚠ `backend/node_modules` is now **WSL**-owned (flipped 2026-09-09 by S23)
 
-## ✅ The `npm install` caveat is cleared
+Phase F added four dependencies — `socket.io`, `ioredis`, `@socket.io/redis-adapter`, and
+`socket.io-client` (dev) — and the install ran from **WSL**, so `esbuild`/`rollup` swapped to their
+Linux binaries. `npm run db:generate` was re-run afterwards, so both Prisma engines are present.
 
-Phase C's four dependencies (`jose`, `helmet`, `cors`, `cookie-parser`) are installed and the tree is
-**Windows**-owned again. Phases D and E added **no dependencies at all**.
+**To run `npm test` in `backend/` from Windows, re-run `npm install` there first.** Nothing else
+needs doing — the Prisma client is dual-target and `argon2` ships prebuilds for both.
 
-The 829 tests were run from WSL against the Windows tree by invoking Windows' own node directly —
-worth knowing, because it means the platform split no longer blocks a session:
+`frontend/node_modules` is **still Windows-owned** and was deliberately not touched. Its
+`typecheck`, `lint` and `contracts:check` are green (all pure JS); its **18 Vitest tests were not
+re-run** — do that from Windows. Phase F's only change to `frontend/` is the regenerated
+`src/contracts/` mirror, which now carries `dto/chat.ts`, `dto/presence.ts` and a fully populated
+`events.ts` (13 files, in sync).
+
+## Phase F — what to verify (the gate for S23–S27)
 
 ```bash
-"/mnt/c/Program Files/nodejs/node.exe" node_modules/vitest/vitest.mjs run
+cd backend
+npm run typecheck && npm run lint && npm test          # 1338 tests
 ```
 
-`tsc`, `eslint`, `prettier` and `contracts:sync` are pure JS and run from either OS. Only `vitest`
-(via `esbuild`/`rollup`) is platform-bound. From Windows, plain `npm test` works as always.
+**`backend/requests/socket.md` is the manual** — every command below in full, with what each
+response proves and the two cookie-jar traps that cost real time. Read that rather than this
+section if you are actually sitting down to do it.
 
-`frontend/` is untouched by Phases C, D and E apart from the regenerated `src/contracts/` mirror
-(Phase E adds `dto/wallet.ts` to it) — its `typecheck` and `contracts:check` are green (both pure
-JS), but its **18 Vitest tests were not re-run**. Run `cd frontend; npm test` from Windows to
-confirm they are still green.
+**The names to read, in order of what they protect:**
+
+| Test | What breaks without it |
+|---|---|
+| `★ a payload carrying userId / playerId / seat cannot alter identity` | The entire seat-impersonation class re-opens |
+| `★ socket.data.identity is immutable for the socket's life` | A token swap mid-connection becomes possible |
+| `★ the seat room and the spectator room are disjoint, both ways` | **Phase G's hands leak.** Asserted now, while there is nothing to leak |
+| `★ a guest joining a table it is not bound to is FORBIDDEN, and audited` | A guest token becomes a wildcard identity (07 §3) |
+| `★ closing one of two tabs leaves the seat online` | A permanent "reconnecting…" badge on somebody who is playing |
+| `★ grace expiry fires the ejection hook exactly once` | S33 ejects twice, or never |
+| `★ every SYSTEM body in the database matches the i18n-key shape` | One row becomes untranslatable English prose forever |
+| `★ a missing callback is survivable` | Caught a real bug: `reply?.({ data: await run() })` short-circuits and **never runs the handler** |
+| `★ no ledger, cooldown, game-state or idempotency key ever reaches Redis` | A lost write becomes lost money (02 §3.2) |
+
+```bash
+# S23 — the handshake. Three identity outcomes and the immutability proof.
+npx vitest run tests/integration/socket/handshake.test.ts --reporter=verbose
+
+# S24 — the room model. Read "★ the seat room and the spectator room are
+#       disjoint, both ways": it asserts membership *and* delivery, which is
+#       the property Phase G's projections will depend on.
+npx vitest run tests/integration/socket/rooms.test.ts --reporter=verbose
+
+# S25 — presence. The unit file is where the awkward arithmetic lives (two tabs,
+#       a reconnect one millisecond inside the window); the integration file
+#       proves the wiring.
+npx vitest run tests/unit/presence-service.test.ts tests/integration/socket/presence.test.ts \
+  --reporter=verbose
+
+# S26 — chat. The i18n-key assertion is the one that matters most long-term.
+npx vitest run tests/integration/socket/chat.test.ts --reporter=verbose
+
+# S27 — Redis, without needing Redis. The guard runs against a recording fake.
+npx vitest run tests/unit/redis-keys.test.ts tests/integration/redis.test.ts --reporter=verbose
+
+# And the guard that will matter in Phase G, landed early:
+npx vitest run tests/unit/socket/projection-boundary.test.ts --reporter=verbose
+```
+
+### Live — two terminals, which is the whole point of S24
+
+```bash
+# Port 3000 is occupied on this machine, hence 3999 throughout.
+PORT=3999 npm run dev
+
+# set up a host, a table, an invite and a guest — see requests/socket.md §0
+# then, in two windows:
+npx tsx scripts/dev-socket.ts --url http://localhost:3999 --cookies /tmp/c.txt --join $TID
+npx tsx scripts/dev-socket.ts --url http://localhost:3999 --cookies /tmp/g.txt --join $TID
+```
+
+Terminal 1: `takeSeat 1` → terminal 2 prints `table:seatChanged` **and** a `chat:message` whose
+body is `table.system.seatTaken` with `params: { name, seat }`. Terminal 2: `takeSeat 1` →
+`✗ SEAT_TAKEN { reason: 'SEAT_OCCUPIED' }`. Then `takeSeat 2` → terminal 1 sees it.
+
+**The one thing to look hardest at:** that SYSTEM message's `body`. If you ever see
+`"Mehrang took seat 1"` there instead of a dotted key, one row has become untranslatable and the
+transcript a Persian reader opens next month is in English.
+
+**Then Ctrl-C terminal 2** → terminal 1 prints
+`table:presence { state: 'disconnected', graceEndsAt: <ISO> }`. Restart it inside the 15 s window →
+`state: 'online'` and a **full** snapshot. Then open a third client with terminal 1's *own* cookies
+and close only one of them: terminal 2 must print **nothing**.
+
+**And the impersonation attempt**, typed into any connected client:
+
+```
+raw table:takeSeat {"tableId":"<TID>","seat":3,"userId":"somebody-else"}
+→ ✗ VALIDATION_FAILED { userId: ['errors.field.unknownKey'] }
+```
+
+*Rejected*, not ignored — see the decisions table below.
 
 ## Phase E — what to verify (the gate for S21–S22)
 
@@ -416,7 +490,11 @@ cd ../frontend && npm run typecheck && npm run lint && npm test && npm run dev
 
 Everything else — Vitest, ESLint, stylelint, Prisma, the seed — runs clean.
 
-### ⚠ One `node_modules`, one platform — currently **Windows** (2026-09-09)
+### ⚠ One `node_modules`, one platform — `backend/` is **WSL**, `frontend/` is **Windows** (2026-09-09)
+
+**Phase F flipped `backend/` to WSL** (four new dependencies, installed from there) and left
+`frontend/` alone. The table below still describes the mechanism; only the "currently installed"
+column has moved for `backend/`.
 
 **Whichever OS last ran `npm install` owns the tree.** Committing works from either OS now that the
 hook needs only `node`, but `npm run dev`, `test` and `lint` run **only on the install platform**.
@@ -424,15 +502,16 @@ The blocker is native binaries, which no amount of code can fix:
 
 | Package | Platform-swapped by `npm install` | Currently installed |
 |---|---|---|
-| `esbuild` (via `tsx`, `vitest`) | `@esbuild/linux-x64` ⟷ `@esbuild/win32-x64` | **win32** — WSL `vitest` dies in `rollup/dist/native.js` |
-| `rollup` (via `vitest`) | `rollup-linux-x64-gnu` ⟷ `rollup-win32-x64-*` | **win32** |
+| `esbuild` (via `tsx`, `vitest`) | `@esbuild/linux-x64` ⟷ `@esbuild/win32-x64` | backend **linux-x64**, frontend **win32** |
+| `rollup` (via `vitest`) | `rollup-linux-x64-gnu` ⟷ `rollup-win32-x64-*` | backend **linux-x64**, frontend **win32** |
 | `@prisma/engines` (the CLI's schema engine) | downloads per host | **both** `schema-engine-windows.exe` and `-debian-openssl-3.0.x` are present |
 | `.prisma/client` (the query engine) | **baked in by `prisma generate`, not by install** | **both** — see `binaryTargets` below |
 | `argon2` | ships prebuilds for every platform | ✅ both |
 
-So: run the suite from **Windows** as the tree stands. To move the toolchain to WSL, re-run
-`npm install` from WSL — that swaps esbuild/rollup back and costs nothing else, because the Prisma
-client is now dual-target either way.
+So, as the tree stands: **`cd backend && npm test` runs from WSL**, and **`cd frontend && npm test`
+runs from Windows**. To move either one, re-run `npm install` from the other OS — it swaps
+esbuild/rollup and costs nothing else, because the Prisma client is dual-target either way. Moving
+`backend/` back to Windows is the likelier need, since that is where the 1338 tests are.
 
 **`prisma generate` is the trap, and it is now disarmed.** The generated client at
 `node_modules/.prisma/client` carries a *host-specific* query engine, so generating from WSL and
@@ -447,6 +526,41 @@ What *is* fixed: nothing in the repo depends on `node_modules/.bin` shims any mo
 hook (S178), `contracts:sync`/`check`, the test global setup and the seed test all spawn
 `node <resolved cli.js>` — see `tests/bin.ts`. So the failure you get from Windows is now an honest
 "missing Prisma engine for this platform" rather than a misleading `ENOENT` on `npx`.
+
+## Decisions made while building Phase F (2026-09-09)
+
+| Decision | Value | Why |
+|---|---|---|
+| **★ An identity-shaped field in a payload is *rejected*, not ignored** | every inbound schema is `.strict()`; none declares `userId`/`playerId`/`guestSessionId`/`memberId` | `11` S23 asks for "is ignored". Rejecting is strictly stronger and matches every REST body in this codebase: there is no field to claim to be somebody else *with*, so the defence is a property of the schema rather than a branch a handler must remember not to write. The counter `socket_identity_spoof_attempts` should sit at zero forever — our own clients are typed from the same file — so any movement is a probe or a bug we introduced |
+| **`socket.data.identity` is `Object.freeze`d and non-writable** | `Object.defineProperty(..., { writable: false, configurable: false })` | "Immutable for the socket's life" (04 §1.1) as a property of the object, not a convention. A test asserts the descriptor, so a future handler that tries to reassign it fails rather than succeeding quietly |
+| **A protocol mismatch is reported over `error`, not refused at the handshake** | `connected` still fires; an `error` follows | Refusing is tidier and leaves an out-of-date page with no way to explain itself — a `connect_error` is a dead screen, whereas an `error` on a live socket is a banner that says "please refresh". The protection comes from the Zod schemas either way |
+| **`IRealtimePublisher` port + `MutableRealtimePublisher`** | `application/ports/realtime.ts`; the gateway attaches the Socket.IO adapter | There is a real cycle — services need to broadcast, broadcasting needs the server, the server's handlers need the services. Late-binding one of the three is unavoidable, and this is the cheapest place: a detached publisher silently drops, which is correct both before the gateway listens and in every unit test. `RecordingPublisher` then turns "did the other three learn seat 2 dropped?" into an array assertion |
+| **★ Room names come from four builders, and a test forbids assembling one by hand** | `tableRoom` / `seatRoom` / `spectatorRoom` / `userRoom`, branded `Room` | This is what makes 04 §2's guarantee *auditable*: `rg 'seatRoom\('` finds every place a private projection can go. A hand-written `` `seat:${id}:${n}` `` would be invisible to that search, and invisible is how a hand leaks. `user:` is excluded from the check because `holderKey` has produced the byte-identical string since Phase B |
+| **The projection guard is a source-scan test, not the ESLint rule 04 §4.1 names** | `tests/unit/socket/projection-boundary.test.ts` | `game:state` does not exist until S30, so a lint rule would today guard a door with no room behind it and sit unproven — while `lint-guards.test.ts` proves every real guard rejects a deliberate violation. The scan gives identical protection now and converts to a rule for free later. It also keeps S48's "the fourth ESLint guard" note true |
+| **`Clock` is a port; `FakeClock` lives in `tests/fakes/`** | `application/ports/clock.ts` | Vitest's fake timers replace the global for the whole file — including Prisma's internals, `ioredis`'s retry loop and Socket.IO's own ping — and the resulting failures read as race conditions rather than as a stubbed clock. Injecting time costs one interface and makes a 90-second Shelem grace window a one-line test |
+| **Presence is in-process; only `disconnectedAt` is persisted** | `PresenceService`, keyed by identity | Live presence is cheap to lose and cheap to recompute (02 §3.2). A persisted `state: 'online'` would survive a crash as a *lie* about somebody the other three are waiting on. The one column that is persisted is the one that must survive: the grace deadline is derived from it, so a restart re-arms the timer from where it stood rather than gifting a fresh 90 seconds (04 §5.4) |
+| **Presence tracks a *set* of sockets per identity** | `sockets: Set<string>` | Multi-tab. Only the last socket closing starts the grace clock. Getting this wrong produces the most annoying possible bug — a permanent "reconnecting…" badge on somebody who is sitting there playing — and it is invisible until somebody opens a second tab |
+| **`away` exists, and the transport ping cannot replace it** | 3 missed 15 s heartbeats | Socket.IO's ping proves a **TCP connection**; it is answered by the browser's networking stack from a backgrounded tab with the screen off, from a closed laptop lid, and from a page whose JS has thrown. The application heartbeat proves a human could still act. `away` starts no timer and forfeits nothing — it exists so three players stop waiting on a fourth whose screen is off |
+| **★ `armGrace` calls `clearTimer`, not `cancelGrace`** | the bug this caused, then the fix | `cancelGrace` also forgets `disconnectedAt` and `graceEndsAt` — right when somebody reconnects, catastrophic when arming: `detach` sets both immediately before, so arming erased the two facts the timer exists to act on. The countdown rendered as absent and **the hook never fired**. Caught by `★ grace expiry fires the ejection hook exactly once` |
+| **★ `attach`, not `noteSeat`, after every seat change** | `afterSeatChange` in `table.handlers.ts` | The ordinary flow is *join the lobby, then sit down*, and at join time there is no member row to track — so a socket that took its seat afterwards was invisible to presence and disconnecting from it started no grace timer at all. Found by the kick test, which is a useful reminder that the "obvious" ordering was the untested one |
+| **★ `const data = await run(...)` before `reply?.(...)`** | `interface/socket/ack.ts` | `reply?.({ data: await run(…) })` reads naturally and is wrong: optional chaining short-circuits its *arguments*. With no ack callback — which Socket.IO permits and a hostile client guarantees — the handler never ran, and every event from such a client was silently ignored while the server looked healthy. Found by `★ a missing callback is survivable` |
+| **A kick evicts by *room*, not by looking sockets up** | `socket.nsp.in(seatRoom(t, s)).socketsLeave(...)` | The seat room *is* the set of that seat occupant's sockets, so this removes exactly the right ones — across every instance once the Redis adapter is in play — without the handler knowing who they are. Emit first, then evict: the other order sends the notice to an empty room |
+| **`syncRooms` is declarative, and computes the exact room set** | leaves what is unwanted, joins what is missing | Incremental room juggling is how a player who moved from seat 1 to seat 2 keeps receiving seat 1's private projection — a bug that stays invisible until Phase G puts cards in those payloads. The room list is derived from `table.seatCount`, so the "leave" side matches by exact name rather than by substring |
+| **`table:releaseSeat` carries no `seat`** | `{ tableId }` only | You can only release your own, the server already knows which, and a payload that could name a different one would be a kick wearing a friendlier name |
+| **Chat is limited per *identity*; seats and joins per *socket*** | `config/socketLimits.ts` | The cost being controlled differs. A seat change costs server work on one connection, and a second tab genuinely doubles the legitimate need. A chat message costs *other people's attention*, and five tabs must not buy five times the spam |
+| **Text and emotes have independent buckets** | 5/10 s and 10/10 s | An emote is a reaction; reacting to four things in a fast hand must not cost you the ability to say "nice one". A shared bucket makes the cheaper action eat the more valuable one |
+| **A bad display name is refused; a bad chat message is *masked*** | `application/policies/chat.ts` | A name is chosen once and is how you are addressed all evening, so making somebody pick again is proportionate. A message is a sentence in a live conversation — refusing it mid-hand teaches people that chat is unreliable, and the swear was already thought. The mask preserves surrounding punctuation, and matches whole tokens so "Scunthorpe" survives |
+| **Bidi overrides and zero-width characters are stripped from every body** | a table of code-point ranges, not a regex literal | `U+202E` reverses everything rendered after it, and in a UI that is *already* bilingual and already switching `dir` per locale that is a genuinely effective way to make a message read as something it is not — in the one place a reader has no reason to be suspicious. A character class of invisible characters is a line of source nobody can review, hence the table |
+| **`SYSTEM` keys are a closed `SYSTEM_MESSAGE_KEYS` object** | `contracts/dto/chat.ts` | "Which strings must the client translate?" is answered by reading one array, and a typo is a compile error rather than a message that renders in production as its own key. The i18n-key shape is additionally enforced by a pattern that **forbids whitespace**, which no English sentence can satisfy |
+| **★ Every Redis key is built in `infrastructure/redis/keys.ts`, and a test enforces it two ways** | no builder produces a forbidden name; nothing outside that directory touches a client | 02 §3.2's four "must NEVER" rows are a rule somebody breaks eighteen months from now in a caching PR that looks entirely reasonable. Funnelling every key through named builders makes it mechanical. `assertStorableKey` is the runtime backstop for a key assembled from a runtime value, and it **throws** rather than falling back — a bucket named `wallet:…` is our bug, and degrading silently would keep Redis clean while letting the mistake ship |
+| **Losing Redis degrades; the limiter falls back in-process** | `RedisRateLimiter` holds a `SlidingWindowRateLimiter` | Failing *open* removes the protection at exactly the moment the system is under stress; throwing turns a cache outage into an API outage. A per-instance budget is strictly weaker than a shared one and strictly stronger than none. This is only defensible *because* nothing durable is in there |
+| **The Redis limiter is one Lua script, not four commands** | `EVAL` | Drop-expired, count, decide, record must be atomic. As a pipeline it is a read-modify-write with a gap, and two requests arriving together both read the old count — which is precisely the scenario a limiter exists for |
+| **Presence in Redis is a *mirror*, cleared at boot** | `RedisPresenceMirror`, 5-minute TTL | It exists so a second instance can render a seat map without asking the first. Nothing reads it to make a decision — ejection and reward eligibility read `TableMember.disconnectedAt` from the database — so losing it costs one recomputation. Clearing at boot is what makes "presence recomputes after a restart" true rather than aspirational |
+| **★ `/_probe/tables/:id/seats` is kept, against S24's instruction** | re-dated for S37 | S24 says delete it once `table:takeSeat` calls the same service, and that reasoning was right when it was written. It is now outweighed: **Newman cannot speak Socket.IO**, and Postman folder 07 uses these routes to seat a guest before asserting that `memberId` and `joinedAt` survive the claim — the single assertion that distinguishes an *updated* seat from a delete-and-reinsert, and therefore the headline check of J2. Deleting them would delete that coverage with nothing able to replace it. Both paths call one method, so they cannot disagree; the router is still dev-only |
+| **`withCredentials` must not be set on a Node socket client** | `scripts/dev-socket.ts` | Cost twenty minutes. It is the *browser's* way of saying "attach your own cookie jar"; in Node there is no jar, and setting it stops `engine.io-client` applying `extraHeaders` on the websocket transport. Every connection then returns `UNAUTHORIZED` from a cookie file that is perfectly good — indistinguishable from an expired token or a broken handshake |
+| **`dev-socket.ts` reads curl's Netscape jar, `#HttpOnly_` and all** | `--cookies /tmp/c.txt` | That is where the cookies already are: every verification step in `11` establishes a session with `curl -c`. The prefix is glued to the *domain* field for exactly the three cookies that matter here, so a parser that skips `#` comment lines silently reads an empty jar |
+| **`zodErrors.ts` extracted, shared by REST and sockets** | `interface/validation/` | Two copies of the issue→key table would drift, and a player would see a translated error on a form and an untranslated one from an ack. Extracted the moment there were two callers |
+| **13 Phase F counters added** | incl. `socket_identity_spoof_attempts` | That one should sit at exactly zero forever, which is what makes any movement worth looking at. `presence_grace_expired` against `reconnects` is the honest answer to "is the grace window long enough?", which is otherwise a guess |
 
 ## Decisions made while building Phase E (2026-09-09)
 
@@ -608,8 +722,51 @@ hook (S178), `contracts:sync`/`check`, the test global setup and the seed test a
 
 ## Notes for next session
 
-- **S23 needs `socket.io` and `socket.io-client`** — the first `npm install` since Phase C. Read the
-  platform note below before running it, and **run `npm run db:generate` afterwards**.
+### Phase F left these for S28–S30 to build on
+
+- **★ Broadcast through `container.realtime`, never through `io` directly.** The four room builders
+  in `application/ports/realtime.ts` are the only way to name a room, and a test enforces it. S30's
+  `broadcastState` loops over seated members and publishes to `seatRoom(tableId, seat)` **once per
+  viewer** — there is deliberately no `publishToTable('game:state', …)` to reach for, and
+  `tests/unit/socket/projection-boundary.test.ts` will fail the build if one appears.
+  The canary in that file (`nothing emits game state at all yet`) is *expected* to fail at S30:
+  delete it then, and consider converting the scan to the ESLint rule 04 §4.1 names.
+- **`PresenceService.onGraceExpired(handler)` is the hook S33 wants.** It fires exactly once per
+  absence, carries `{ tableId, memberId, seat, identity, gameSlug, disconnectedAt }`, and swallows a
+  throwing handler so one bad hook cannot stop the others from inside a timer callback. The
+  *consequence* — attach a bot, mark `EJECTED_ABANDON` — is S33's; the mechanism is done and tested.
+- **Timers come from `application/ports/clock.ts`.** S31's `TurnTimerService` should take the same
+  `Clock` and be tested with `tests/fakes/clock.ts` — do not reach for `setTimeout`, and do not
+  reach for Vitest's fake timers (they replace the global for Prisma, ioredis and Socket.IO too, and
+  the failures read as race conditions).
+- **`table:statusChanged` is declared and emitted only by `TableService.close`.** S30's `game:start`
+  should emit it for `WAITING → IN_PROGRESS`, from the handler rather than the service — every
+  *seat* change is announced by the handler that made it, because that is the layer that knows which
+  socket to exclude and which system message to write. `close` is the exception because it happens
+  over REST, where nothing on the socket side would otherwise notice.
+- **Adding an event is four edits, in this order:** the payload schema and the two typed maps in
+  `contracts/events.ts`, `npm run contracts:sync`, a handler registered in
+  `interface/socket/handlers/`, and a test. The `handler(ack, Schema, fn)` wrapper does the Zod
+  parse, the `AppError → ack` mapping and the opaque `INTERNAL`; a handler never sees an unparsed
+  payload and never formats an error.
+- **`atTable(context, tableId)` is the two-line gate every table-scoped event needs** — the guest
+  binding (403 + an `ALERT` audit row) and the join check. Copy `table.handlers.ts`; it is the
+  fullest example.
+- **`tests/helpers/socket.ts` gives you a real gateway on an ephemeral port.** `startSocketHarness()`
+  → `{ container, gateway, url, clock, register(), guest(), open(), resetLimits() }`. **Call
+  `resetLimits()` in `beforeEach`** — chat is limited per *identity*, so one flood test silences
+  every later test that reuses the same account, and the failures look like missing broadcasts.
+  `client.next(event)` checks the transcript first, which is what stops the emit-then-wait race that
+  makes socket tests flaky.
+- **`scripts/dev-socket.ts` is the verification tool for the next 19 sessions.** `raw <event> <json>`
+  emits anything at all, which is how you test a handler before there is a UI for it.
+  `backend/requests/socket.md` is its manual and carries both cookie-jar traps.
+- **Two dev-only route groups remain, both now dated for S37**: `/_probe/tables/:id/seats*` (kept
+  against S24's instruction — see the Phase F decisions) and `GET /_probe/wallet`. `POST /_probe`
+  (S12) stays indefinitely.
+
+### Standing rules from earlier phases
+
 - **Every credit in the platform must go through `WalletService`.** `credit(input)` opens its own
   transaction; `creditWithin(repos, input)` joins one the caller already opened — that second form is
   what S36's settlement and S22's vesting use, and it is the only way to credit as part of a larger
@@ -739,3 +896,12 @@ Five things about the collection worth remembering:
 - **No CSRF token anywhere, correctly.** Postman sends no `Origin`/`Referer`, so the double-submit
   token is not demanded. Adding an `Origin` header by hand requires `X-CSRF-Token` too.
 - **It found a real bug on its first run** — see the alphabet row in the Phase D decisions.
+- **★ Folder 07 is why `/_probe/tables/:id/seats` still exists.** S24 dated those routes for
+  deletion once `table:takeSeat` shipped, and it has — but **Newman cannot speak Socket.IO**, and
+  folder 07 uses them to seat a guest before asserting that `memberId` and `joinedAt` survive the
+  claim. That is the one assertion distinguishing an *updated* seat from a delete-and-reinsert, and
+  therefore the headline check of journey J2. Re-dated for S37. If you ever do delete them, delete
+  folder 07's seat setup in the same commit and say out loud what coverage went with it.
+- **Phase F added no REST routes**, so the collection is unchanged — and was re-run against Phase F
+  to prove nothing broke: **71 requests, 99 assertions, 0 failures**. The socket surface is verified
+  by `backend/requests/socket.md` and by 60 socket tests instead.

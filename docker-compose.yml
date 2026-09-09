@@ -1,0 +1,50 @@
+# Development dependencies only — S27.
+#
+# This file deliberately contains **one service**. The API, the frontend and the
+# admin frontend are containerised in S45, and the production stack (Caddy,
+# Postgres, backups) is S46; adding placeholders for them now would mean three
+# services that are wrong by the time anyone runs them.
+#
+# ★ What matters here is what Redis is *for*. 02 §3.2 puts four things in it —
+# the Socket.IO adapter, rate-limit windows, presence, and (later) the
+# matchmaking queue — and every one of them is cheap to lose and expensive to
+# recompute. Wallet state, ledger rows, matchmaking cooldowns, game state and
+# reward idempotency keys may never live here, which is enforced by
+# `tests/unit/redis-keys.test.ts` rather than by remembering.
+#
+#     docker compose up -d redis
+#     REDIS_URL=redis://localhost:6379 npm run dev    # in backend/
+#
+# And the property worth checking once by hand:
+#
+#     redis-cli KEYS 'bg:ratelimit:*'   # → counters appear as you make requests
+#     redis-cli KEYS '*wallet*'         # → MUST be empty. Money is never here
+#
+# **The app runs without this file.** With `REDIS_URL` unset the backend uses an
+# in-memory socket adapter and an in-process limiter, which is the correct
+# configuration for the single-process VPS M0 targets — not a degraded one.
+# Redis earns its place when there is a second API instance.
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: boardgames-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    # No persistence, on purpose. An `appendonly` Redis would survive a restart
+    # holding rate-limit windows and presence entries that describe sockets
+    # which no longer exist — stale data that is worse than no data, because the
+    # seat map would show players the other three are waiting on. Everything in
+    # here is designed to be recomputed.
+    command: >
+      redis-server
+      --save ""
+      --appendonly no
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5

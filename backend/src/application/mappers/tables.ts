@@ -1,4 +1,6 @@
+import type { PresenceState } from '../../contracts/dto/presence.js'
 import type {
+  MemberView,
   OccupantView,
   SeatView,
   TableDetail,
@@ -126,6 +128,70 @@ export function toSeatViews(
       botSubstituted: member.botSubstituted,
     }
   })
+}
+
+/**
+ * The per-person view (S24), as distinct from the per-seat one above.
+ *
+ * `table:snapshot` carries both, and they answer different questions.
+ * `seats[]` is what the "sit here" buttons bind to, so it is always exactly
+ * `seatCount` long and an empty seat is a first-class entry. `members[]` is who
+ * is actually present — which is the only one of the two that can carry the
+ * **spectators**, who hold no seat and would otherwise appear nowhere but a
+ * count.
+ *
+ * `presence` is looked up rather than stored on the row on purpose: it is
+ * derived from live sockets, it is cheap to lose, and it is recomputed on
+ * restart (02 §3.2). The one piece that *is* persisted is `disconnectedAt`,
+ * because the grace deadline has to survive an API restart without gifting
+ * anyone extra time (04 §5.4).
+ */
+export interface PresenceLookup {
+  (member: TableMember): { state: PresenceState; graceEndsAt: string | null }
+}
+
+/** Everyone is online until something says otherwise — the safe default. */
+export const ASSUME_ONLINE: PresenceLookup = () => ({ state: 'online', graceEndsAt: null })
+
+export function toMemberViews(
+  members: readonly TableMember[],
+  directory: OccupantDirectory,
+  viewer: IdentityRef | null,
+  presence: PresenceLookup = ASSUME_ONLINE,
+): MemberView[] {
+  return activeMembers(members).map((member) => {
+    const { state, graceEndsAt } = presence(member)
+
+    return {
+      memberId: member.id,
+      seat: member.seat,
+      role: member.role,
+      team: member.team,
+      occupant: toOccupantView(member, directory),
+      isSelf: isSameOccupant(member, viewer),
+      joinedAt: member.joinedAt.toISOString(),
+      botSubstituted: member.botSubstituted,
+      // A bot is never "reconnecting": it has no transport to lose, and showing
+      // one as away would make the substitution look broken.
+      presence: member.isBot ? 'online' : state,
+      graceEndsAt: member.isBot ? null : graceEndsAt,
+    }
+  })
+}
+
+/**
+ * `user:<id>` / `guest:<id>` → member, for the chat mapper's seat lookup.
+ * Bots are excluded: they have no actor key and never author a message.
+ */
+export function membersByActor(members: readonly TableMember[]): Map<string, TableMember> {
+  const index = new Map<string, TableMember>()
+
+  for (const member of members) {
+    if (member.userId !== null) index.set(`user:${member.userId}`, member)
+    else if (member.guestSessionId !== null) index.set(`guest:${member.guestSessionId}`, member)
+  }
+
+  return index
 }
 
 export function toTableSummary(

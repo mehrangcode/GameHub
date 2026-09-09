@@ -93,11 +93,14 @@ _Built and green (829 backend tests, up from 708). Awaiting Mehrang's "You verif
 
 ### Phase F — Sockets
 
-- [ ] S23 Socket.IO gateway, handshake identity, `dev-socket.ts`
-- [ ] S24 Room model, `table:join`, `table:snapshot`, seat broadcast
-- [ ] S25 Presence, heartbeat, disconnect grace
-- [ ] S26 Chat + emotes
-- [ ] S27 Redis adapter, presence sets, rate limits, fallback
+_Built and green (1338 backend tests, up from 829). Awaiting Mehrang's "You verify" pass — see
+`context.md` for the exact commands, and `backend/requests/socket.md` for the two-terminal walks._
+
+- [✅] S23 Socket.IO gateway, handshake identity, `dev-socket.ts`
+- [✅] S24 Room model, `table:join`, `table:snapshot`, seat broadcast
+- [✅] S25 Presence, heartbeat, disconnect grace
+- [✅] S26 Chat + emotes
+- [✅] S27 Redis adapter, presence sets, rate limits, fallback
 
 ### Phase G — Event log
 

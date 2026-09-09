@@ -1,13 +1,17 @@
 import type { PrismaClient } from '@prisma/client'
 import type { Logger } from 'pino'
+import { systemClock, type Clock } from './application/ports/clock.js'
 import type { IRateLimiter } from './application/ports/rateLimiter.js'
+import { MutableRealtimePublisher } from './application/ports/realtime.js'
 import { AuthService } from './application/services/AuthService.js'
+import { ChatService } from './application/services/ChatService.js'
 import { GameCatalogService } from './application/services/GameCatalogService.js'
 import { GuestClaimService } from './application/services/GuestClaimService.js'
 import { GuestSessionService } from './application/services/GuestSessionService.js'
 import { InviteService } from './application/services/InviteService.js'
 import { LoginThrottle } from './application/services/LoginThrottle.js'
 import { MetricsRegistry } from './application/services/MetricsRegistry.js'
+import { PresenceService } from './application/services/PresenceService.js'
 import { SecurityEventService } from './application/services/SecurityEventService.js'
 import { TableService } from './application/services/TableService.js'
 import { WalletService } from './application/services/WalletService.js'
@@ -26,6 +30,9 @@ import { prisma as defaultPrisma } from './infrastructure/prisma/client.js'
 import { checkDatabase, type DependencyStatus } from './infrastructure/prisma/health.js'
 import { buildRepositories, UnitOfWork } from './infrastructure/prisma/UnitOfWork.js'
 import { SlidingWindowRateLimiter } from './infrastructure/rateLimit/slidingWindow.js'
+import { createRedisConnection, type RedisConnection } from './infrastructure/redis/client.js'
+import { RedisPresenceMirror } from './infrastructure/redis/presenceMirror.js'
+import { RedisRateLimiter } from './infrastructure/redis/RedisRateLimiter.js'
 
 /**
  * 02-technical-prd.md §5.5 — the composition root. One file, explicit, no DI
@@ -75,8 +82,30 @@ export interface Container {
   readonly tables: TableService
   readonly invites: InviteService
 
-  /** Powers `/ready`. Redis joins the report in S27. */
-  readonly checkReadiness: () => Promise<{ database: DependencyStatus }>
+  /**
+   * S24 — the broadcasting seam. Late-bound: `createGateway` attaches the
+   * Socket.IO adapter once the HTTP server exists, and until then (and in every
+   * test that has no transport) it silently drops. That is the correct
+   * behaviour for both, and it is what breaks the services ⇄ server ⇄ handlers
+   * cycle without a DI framework.
+   */
+  readonly realtime: MutableRealtimePublisher
+  /** S25 — disconnect grace, heartbeat, `away`. Owns real timers; `stop()` in shutdown. */
+  readonly presence: PresenceService
+  /** S26 — chat, emotes, and the i18n-keyed SYSTEM narration. */
+  readonly chat: ChatService
+
+  /**
+   * S27 — present only when `REDIS_URL` is set. `null` is the ordinary
+   * single-instance deployment, not a degraded one: the in-memory socket
+   * adapter and the in-process limiter are correct for one process, and Redis
+   * earns its place when there is a second (02 §3.2).
+   */
+  readonly redis: RedisConnection | null
+  readonly presenceMirror: RedisPresenceMirror | null
+
+  /** Reports every configured dependency, and only the configured ones. */
+  readonly checkReadiness: () => Promise<Record<string, DependencyStatus>>
   readonly shutdown: () => Promise<void>
 }
 
@@ -86,6 +115,10 @@ export interface ContainerOverrides {
   readonly env?: Env
   /** Tests hand in a limiter with a tiny window instead of sleeping. */
   readonly rateLimiter?: IRateLimiter
+  /** S25's timers, so a 90-second grace window does not have to elapse in a test. */
+  readonly clock?: Clock
+  /** Shortens every disconnect grace to this, ignoring `meta.disconnectGraceMs`. */
+  readonly graceMsOverride?: number
 }
 
 export function buildContainer(overrides: ContainerOverrides = {}): Container {
@@ -95,9 +128,30 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
 
   const repos = buildRepositories(prisma)
   const uow: IUnitOfWork = new UnitOfWork(prisma)
-  const rateLimiter = overrides.rateLimiter ?? new SlidingWindowRateLimiter()
 
   const metrics = new MetricsRegistry()
+
+  /**
+   * ★ Redis is optional, and the whole platform is built so that this line can
+   * produce `null` without anything downstream caring (02 §3.2). Unset
+   * `REDIS_URL` means the in-memory socket adapter, the in-process limiter and
+   * no presence mirror — which is the correct configuration for a
+   * single-process deployment, not a fallback from a better one.
+   */
+  const redis =
+    env.REDIS_URL === undefined
+      ? null
+      : createRedisConnection({
+          url: env.REDIS_URL,
+          logger,
+          onDegraded: () => metrics.increment('redis_degraded'),
+        })
+
+  const rateLimiter =
+    overrides.rateLimiter ??
+    (redis === null ? new SlidingWindowRateLimiter() : new RedisRateLimiter(redis, logger))
+
+  const presenceMirror = redis === null ? null : new RedisPresenceMirror(redis, logger)
   const security = new SecurityEventService(repos.securityEvents, logger, metrics)
 
   const hasher = new Argon2PasswordHasher(env)
@@ -146,7 +200,23 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
   const registry = buildGameRegistry({ includeDevGames: env.NODE_ENV !== 'production' })
   const catalog = new GameCatalogService(registry)
 
-  const tables = new TableService({ repos, catalog, security, metrics, logger })
+  const realtime = new MutableRealtimePublisher()
+  const tables = new TableService({ repos, catalog, security, metrics, logger, realtime })
+
+  const presence = new PresenceService({
+    repos,
+    registry,
+    realtime,
+    metrics,
+    logger,
+    clock: overrides.clock ?? systemClock,
+    ...(overrides.graceMsOverride === undefined
+      ? {}
+      : { graceMsOverride: overrides.graceMsOverride }),
+    ...(presenceMirror === null ? {} : { mirror: presenceMirror }),
+  })
+
+  const chat = new ChatService({ repos, tables, realtime, rateLimiter, metrics, logger })
 
   const invites = new InviteService({
     repos,
@@ -175,10 +245,24 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
     catalog,
     tables,
     invites,
-    checkReadiness: async () => ({ database: await checkDatabase(prisma) }),
+    realtime,
+    presence,
+    chat,
+    redis,
+    presenceMirror,
+    checkReadiness: async () => ({
+      database: await checkDatabase(prisma),
+      // Reported only when configured. An unconfigured dependency listed as
+      // failing would take a perfectly healthy single-instance deployment out
+      // of rotation for not having a Redis it never wanted.
+      ...(redis === null ? {} : { redis: await redis.check() }),
+    }),
     shutdown: async () => {
+      // Presence first: it holds armed grace timers, and one firing against a
+      // disconnected Prisma client would log an error during every shutdown.
+      presence.stop()
       rateLimiter.dispose()
-      await prisma.$disconnect()
+      await Promise.all([redis?.close(), prisma.$disconnect()])
     },
   }
 }

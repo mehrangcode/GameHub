@@ -1,6 +1,7 @@
 import type { Request, RequestHandler } from 'express'
 import type { ZodType, ZodError } from 'zod'
 import { InternalError, ValidationError } from '../../../domain/errors/errors.js'
+import { collectZodIssues } from '../../validation/zodErrors.js'
 
 /**
  * The boundary parser — 02 §7, P7.
@@ -62,37 +63,13 @@ export function zodValidate(schemas: ValidationSchemas): RequestHandler {
 }
 
 /**
- * Zod issue code → i18n key.
- *
- * **`fieldErrors` may never carry a rendered English sentence.** Zod's defaults
- * ("Expected number, received string") are exactly that, and shipping them
- * would put untranslatable prose in front of a Persian-speaking user — the one
- * failure the whole `code` + `i18nKey` error contract exists to prevent. A
- * schema that wants a more specific key says so in its own message (see
- * `PasswordSchema`); everything else lands on one of these.
- */
-const ISSUE_KEYS: Record<string, string> = {
-  invalid_type: 'errors.field.invalidType',
-  invalid_literal: 'errors.field.invalidValue',
-  invalid_enum_value: 'errors.field.invalidOption',
-  invalid_union: 'errors.field.invalidValue',
-  invalid_union_discriminator: 'errors.field.invalidOption',
-  invalid_string: 'errors.field.invalidFormat',
-  invalid_date: 'errors.field.invalidDate',
-  too_small: 'errors.field.tooSmall',
-  too_big: 'errors.field.tooBig',
-  not_multiple_of: 'errors.field.invalidValue',
-  unrecognized_keys: 'errors.field.unknownKey',
-  custom: 'errors.field.invalid',
-}
-
-/**
  * `email: ['errors.field.invalidFormat']` for a body field, `query.limit: [...]`
  * for anything else — a form binds to the bare name, and the prefix stops a
  * `limit` in the query from colliding with a `limit` in the body.
  *
- * `prose` collects Zod's own wording for the log line. It is genuinely useful
- * when debugging a schema, and it stays on the server.
+ * The issue → key table itself lives in `interface/validation/zodErrors.ts`,
+ * shared with the socket boundary (S23). Two copies would drift, and a player
+ * would see a translated error on a form and an untranslated one from an ack.
  */
 function collectIssues(
   error: ZodError,
@@ -100,30 +77,10 @@ function collectIssues(
   into: Record<string, string[]>,
   prose: string[],
 ): void {
-  for (const issue of error.issues) {
-    prose.push(`${source}.${issue.path.join('.') || '(root)'}: ${issue.message}`)
-
-    // An unrecognised key has an empty path, so name the offending keys
-    // instead of filing them all under the object itself.
-    const paths =
-      issue.code === 'unrecognized_keys'
-        ? issue.keys.map((key) => [...issue.path, key].join('.'))
-        : [issue.path.join('.')]
-
-    for (const path of paths) {
-      const key = source === 'body' ? path || '_' : `${source}.${path || '_'}`
-      ;(into[key] ??= []).push(i18nKeyFor(issue))
-    }
-  }
-}
-
-/**
- * A schema's own message wins when it already *is* a key — that is how
- * `errors.passwordTooShort` reaches the form instead of a generic "too small".
- */
-function i18nKeyFor(issue: ZodError['issues'][number]): string {
-  if (issue.message.startsWith('errors.')) return issue.message
-  return ISSUE_KEYS[issue.code] ?? 'errors.field.invalid'
+  collectZodIssues(error, into, {
+    ...(source === 'body' ? {} : { prefix: source }),
+    prose,
+  })
 }
 
 function read<T>(req: Request, source: Source): T {

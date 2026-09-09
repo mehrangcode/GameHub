@@ -9,6 +9,7 @@ import {
   TableOriginSchema,
   TableStatusSchema,
 } from '../enums.js'
+import { PresenceStateSchema } from './presence.js'
 
 /**
  * Table wire shapes — 02 §5 `/tables`, 03 §3.2.
@@ -110,6 +111,35 @@ export const SeatViewSchema = z.object({
 })
 
 export type SeatView = z.infer<typeof SeatViewSchema>
+
+/**
+ * A member of the table, seated or not — S24, the `members[]` of
+ * `table:snapshot` (04 §3.2).
+ *
+ * Distinct from {@link SeatViewSchema}, which is indexed by *seat* and always
+ * has exactly `seatCount` entries so the "sit here" buttons have something to
+ * bind to. This is indexed by *person*, so it can carry the spectators — who
+ * have no seat and would otherwise be invisible to everything except a count.
+ *
+ * `presence` rides along because a seat map without it is the frozen-table bug:
+ * a disconnected player and a thinking player render identically.
+ */
+export const MemberViewSchema = z.object({
+  memberId: z.string(),
+  /** Null for a spectator. */
+  seat: z.number().int().nullable(),
+  role: MemberRoleSchema,
+  team: z.number().int().nullable(),
+  occupant: OccupantViewSchema,
+  isSelf: z.boolean(),
+  joinedAt: z.string(),
+  botSubstituted: z.boolean(),
+  presence: PresenceStateSchema,
+  /** ISO 8601; present only while `disconnected`. Absolute, never a duration. */
+  graceEndsAt: z.string().nullable(),
+})
+
+export type MemberView = z.infer<typeof MemberViewSchema>
 
 /** One row in the "resume" list. */
 export const TableSummarySchema = z.object({
