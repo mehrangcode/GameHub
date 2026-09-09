@@ -50,12 +50,16 @@ Tick when **Mehrang** has run the session's "You verify" steps, not when the cod
 - [ ] S06 Idempotent seed script
 
 ### Phase B — Domain & persistence
+*Built and green (392 backend tests, up from 90). Awaiting Mehrang's "You verify" pass — see
+`context.md` for the exact commands.*
 - [ ] S07 Value objects, entities, `AppError` taxonomy
 - [ ] S08 Repository interfaces + in-memory fakes
 - [ ] S09 Prisma repositories + `UnitOfWork`
 - [ ] S10 `container.ts`, `app.ts`, Pino redaction, `/health` + `/ready`
 
 ### Phase C — Auth
+*Built and green (561 backend tests, up from 392). Awaiting Mehrang's "You verify" pass — see
+`context.md` for the exact commands and the one `npm install` caveat.*
 - [ ] S11 argon2id + JWT + cookie helpers
 - [ ] S12 Zod validation, error middleware, helmet, CORS, rate limit
 - [ ] S13 `POST /auth/register`, `/auth/login`, `GET /auth/me`

@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 /**
@@ -35,9 +35,12 @@ describe('contracts purity', () => {
     for (const spec of specifiers) {
       expect(spec, `${spec} is a Node built-in`).not.toMatch(/^node:/)
       expect(['fs', 'path', 'crypto', 'os', 'url', 'child_process']).not.toContain(spec)
-      // Only zod and same-directory relatives are allowed.
-      const allowed = spec === 'zod' || spec.startsWith('./')
-      expect(allowed, `${spec} is not allowed in contracts/`).toBe(true)
+      // Only zod and relatives are allowed — and a relative must not climb out
+      // of contracts/, which is the property that keeps the directory copyable.
+      if (spec === 'zod') continue
+      expect(spec, `${spec} is not a relative import`).toMatch(/^\.\.?\//)
+      const resolved = resolve(dirname(file), spec)
+      expect(resolved.startsWith(contractsDir), `${spec} resolves outside contracts/`).toBe(true)
     }
   })
 

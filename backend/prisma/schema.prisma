@@ -21,6 +21,17 @@
 
 generator client {
   provider = "prisma-client-js"
+
+  // One `node_modules`, two host OSes: this tree lives on an NTFS drive reachable
+  // from both a Windows shell and WSL, and `prisma generate` bakes a *host-
+  // specific* query engine into node_modules/.prisma/client. Generating from one
+  // side and then running the suite from the other fails at the first query with
+  // "could not locate the Query Engine for runtime …" — while vitest and
+  // `prisma db push` still work, which makes it read as a test bug. Naming both
+  // targets means one `generate` serves either host.
+  // Cost: CI on Linux also fetches the Windows engine (~20 MB, cached).
+  // Do not run `prisma format` to tidy this — it re-aligns the whole file.
+  binaryTargets = ["native", "windows", "debian-openssl-3.0.x"]
 }
 
 datasource db {

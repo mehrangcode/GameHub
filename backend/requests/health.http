@@ -1,0 +1,42 @@
+### The .http collection we grow every session.
+### VS Code: install "REST Client" and click "Send Request" above any block.
+### JetBrains: built in.
+###
+### S10 starts it with the two probes. Auth lands in S13, tables in S18.
+
+@host = http://localhost:3000
+@api = {{host}}/api/v1
+
+### Liveness — must answer 200 even when the database is down.
+GET {{host}}/health
+Accept: application/json
+
+### The same probe through the /api/v1 prefix the Vite dev proxy forwards.
+GET {{api}}/health
+Accept: application/json
+
+### Readiness — 200 only while the database is reachable AND migrated.
+### Point DATABASE_URL at a file with no schema and this turns 503 while
+### /health stays 200. That difference is the whole reason there are two.
+GET {{host}}/ready
+Accept: application/json
+
+### Readiness through the prefix.
+GET {{api}}/ready
+Accept: application/json
+
+### A request id you supply comes back on the response and appears in every
+### log line for the request — paste one here, then grep the dev console.
+GET {{host}}/ready
+x-request-id: manual-trace-001
+Accept: application/json
+
+### ★ Must be 404. There is no admin surface on the public port (12 §2.4).
+### The admin app answers the same path on :3100, which is never published.
+GET {{host}}/admin/api/v1/users
+Accept: application/json
+
+### Any unknown route: 404 in the standard error shape,
+### { "code": "NOT_FOUND", "i18nKey": "errors.notFound" } — never English prose.
+GET {{api}}/no-such-route
+Accept: application/json

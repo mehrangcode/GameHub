@@ -28,10 +28,20 @@ export const EnvSchema = z.object({
   CORS_ORIGIN: z.string().url().default('http://localhost:5173'),
 
   JWT_ACCESS_SECRET: z.string().min(32, 'must be at least 32 characters'),
+  /**
+   * Peppers the refresh-token hash. Refresh tokens are opaque random values,
+   * not JWTs (07 §5.3), so this secret keys the HMAC that is stored in
+   * `RefreshToken.tokenHash` — rotating it logs everyone out, deliberately.
+   */
   JWT_REFRESH_SECRET: z.string().min(32, 'must be at least 32 characters'),
   GUEST_TOKEN_SECRET: z.string().min(32, 'must be at least 32 characters'),
 
-  ACCESS_TOKEN_TTL_SEC: z.coerce.number().int().positive().default(900),
+  /** Identifies our own tokens; a token minted for another audience is rejected. */
+  JWT_ISSUER: z.string().min(1).default('boardgames'),
+  JWT_AUDIENCE: z.string().min(1).default('boardgames-api'),
+
+  /** 07 §5.3 — 10 minutes. Short enough that revocation lag is bounded. */
+  ACCESS_TOKEN_TTL_SEC: z.coerce.number().int().positive().default(600),
   REFRESH_TOKEN_TTL_SEC: z.coerce
     .number()
     .int()
@@ -42,6 +52,23 @@ export const EnvSchema = z.object({
     .int()
     .positive()
     .default(60 * 60 * 12),
+
+  /**
+   * argon2id cost (07 §5.3, OWASP baseline `m=19456,t=2,p=1`). In config rather
+   * than hard-coded because raising it is the standard response to faster
+   * hardware, and `needsRehash` upgrades stored hashes on the next login.
+   */
+  ARGON2_MEMORY_KIB: z.coerce.number().int().min(8192).default(19_456),
+  // 2 is also argon2's own floor — the library rejects t=1 outright.
+  ARGON2_TIME_COST: z.coerce.number().int().min(2).default(2),
+  ARGON2_PARALLELISM: z.coerce.number().int().min(1).default(1),
+
+  /** Global per-IP sliding window (S12). Redis-backed from S27. */
+  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
+  RATE_LIMIT_WINDOW_SEC: z.coerce.number().int().positive().default(60),
+  /** 07 §5.3 — 5 login attempts per 15 min, per email *and* per IP. */
+  LOGIN_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  LOGIN_WINDOW_SEC: z.coerce.number().int().positive().default(900),
 
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 

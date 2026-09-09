@@ -1,0 +1,252 @@
+### Phase C — auth. Grown by S13 (register/login/me), S14 (refresh/logout),
+### S16 (guest). Run the blocks top to bottom: each one leaves cookies the next
+### one needs.
+###
+### Why no X-CSRF-Token header anywhere below: the CSRF check only demands the
+### double-submit token from requests that carry an `Origin` — i.e. from
+### browsers, the only clients with an ambient cookie jar to ride (07 §5.4).
+### A REST client sends no Origin, so it is exempt by construction, not by a
+### development-only switch.
+
+@host = http://localhost:3000
+@api = {{host}}/api/v1
+@email = mehrang@test.dev
+@password = correct-horse-battery
+
+### ── S13 ─────────────────────────────────────────────────────────────────────
+
+### Register. → 201, plus `access` and `refresh` Set-Cookie headers.
+### Look at the refresh cookie: Path=/api/v1/auth, not `/`. It is not attached
+### to the hundreds of ordinary API calls that have no business seeing it.
+# @name register
+POST {{api}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "{{password}}",
+  "displayName": "Mehrang"
+}
+
+### The same email again → 409 EMAIL_TAKEN. Then open Studio and confirm there
+### is still exactly ONE user, ONE preferences row, and three wallets — the
+### whole registration is one transaction, so a rejected duplicate leaves
+### nothing behind.
+POST {{api}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "some-other-password",
+  "displayName": "Impostor"
+}
+
+### Case is not a second account — the email is normalised. → 409.
+POST {{api}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "MEHRANG@Test.DEV",
+  "password": "some-other-password",
+  "displayName": "Impostor"
+}
+
+### ★ A weak password is refused by the shared Zod schema — the same schema the
+### S39 sign-up form will import. → 400 with fieldErrors.password.
+POST {{api}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "weak@test.dev",
+  "password": "short",
+  "displayName": "Weak"
+}
+
+### ★ You cannot make yourself an admin: `role` is not in the schema, and the
+### schema is strict. → 400 naming the unknown key.
+POST {{api}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "sneaky@test.dev",
+  "password": "correct-horse-battery",
+  "displayName": "Sneaky",
+  "role": "ADMIN"
+}
+
+### Impersonation is refused. "H0st", "Adm1n", "A d m i n" all normalise onto
+### the reserved word. → 400 errors.displayNameReserved.
+POST {{api}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "fake-host@test.dev",
+  "password": "correct-horse-battery",
+  "displayName": "H0st"
+}
+
+### Log in. → 200 and a fresh cookie pair.
+# @name login
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "{{password}}"
+}
+
+### ★ A wrong password. Compare this response to the next one, body **and**
+### response time: an unknown email still pays for one argon2 verification, so
+### neither the payload nor the timing tells an attacker which emails exist.
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "definitely-not-it"
+}
+
+### An unknown email. Identical 401.
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "nobody-at-all@test.dev",
+  "password": "definitely-not-it"
+}
+
+### Send the wrong-password block five times in a row and this is what you get:
+### 429 with retryAfterMs — 5 attempts / 15 min, per email AND per IP (07 §5.3).
+### A correct password is throttled too, or the lockout would be a suggestion.
+
+### Who am I? Cookie only — no Authorization header anywhere in this file.
+GET {{api}}/auth/me
+Accept: application/json
+
+### ── S14 ─────────────────────────────────────────────────────────────────────
+
+### Rotate. → 200, and both cookies are replaced. In Studio, the old
+### RefreshToken row now has revokedAt and replacedById set, and the new row
+### shares its familyId.
+# @name refresh
+POST {{api}}/auth/refresh
+
+### ★ Now replay a token you already rotated. The clean way to see it: copy the
+### `refresh=...` value from the register response above, paste it below, and
+### send. → 401 TOKEN_REUSED — and the whole family dies, including the token
+### that was valid a second ago. Re-run `/auth/me` and `/auth/refresh`: both
+### 401. We cannot tell the thief from the victim, so both log in again.
+###
+### That containment is the entire point of S14. Confirm the ALERT-severity
+### BAD_TOKEN row in SecurityEvent.
+POST {{api}}/auth/refresh
+Cookie: refresh=PASTE_AN_ALREADY_ROTATED_TOKEN_HERE
+
+### A token nobody issued → 401 UNKNOWN_TOKEN, plus a BAD_TOKEN audit row.
+POST {{api}}/auth/refresh
+Cookie: refresh=this-was-never-issued
+
+### Log out: revokes the family, clears every cookie. Idempotent — send it
+### twice, both 200. "End my session" has one acceptable outcome.
+POST {{api}}/auth/logout
+
+### After logout: 401.
+GET {{api}}/auth/me
+Accept: application/json
+
+### ── S16 ─────────────────────────────────────────────────────────────────────
+
+### Play with no account. SEEDDEMO is minted by `npm run seed`; S19 mints real
+### ones. → 201 with { identity: { kind: "guest", tableId }, redirectTo }.
+### ★ Note what is NOT in the request: a tableId. The invite decides which
+### table this identity is good for — a caller-supplied table would be a
+### privilege-escalation primitive (07 §5.1).
+# @name guest
+POST {{api}}/auth/guest
+Content-Type: application/json
+
+{
+  "inviteCode": "SEEDDEMO",
+  "displayName": "Sara"
+}
+
+### → {"kind":"guest","tableId":"..."} — and no User row was created.
+GET {{api}}/auth/me
+Accept: application/json
+
+### ★ THE assertion of S16. Take any *other* table id from Studio and put it
+### below. → 403 GUEST_TABLE_BINDING, plus an ALERT SEAT_IMPERSONATION row in
+### SecurityEvent.
+###
+### `/_probe/table/:tableId` is a dev-only stand-in so this is checkable now;
+### `/tables/:id` inherits the same `enforceGuestBinding` middleware in S18.
+GET {{api}}/_probe/table/PASTE_A_DIFFERENT_TABLE_ID
+Accept: application/json
+
+### The guest's own table → 200.
+GET {{api}}/_probe/table/PASTE_THE_BOUND_TABLE_ID
+Accept: application/json
+
+### Unknown, expired and revoked codes are deliberately indistinguishable —
+### identical 410 INVITE_EXPIRED for all three, so probing codes yields no
+### signal (07 §5.2).
+POST {{api}}/auth/guest
+Content-Type: application/json
+
+{
+  "inviteCode": "NOSUCHCD",
+  "displayName": "Sara"
+}
+
+### ── S12: the boundary, visible ──────────────────────────────────────────────
+
+### Missing required field → 400 with fieldErrors naming it.
+POST {{api}}/_probe
+Content-Type: application/json
+
+{}
+
+### ★ "5" is NOT coerced into 5. A coercing boundary turns a client bug into a
+### server-side type confusion three layers down.
+POST {{api}}/_probe
+Content-Type: application/json
+
+{ "n": "5" }
+
+### An unknown key is rejected, not quietly dropped — that is how a misspelled
+### field becomes a setting which silently never applied.
+POST {{api}}/_probe
+Content-Type: application/json
+
+{ "n": 5, "sneaky": true }
+
+### Valid. → 200, echoing the *parsed* value.
+POST {{api}}/_probe
+Content-Type: application/json
+
+{ "n": 5, "label": "hello" }
+
+### ★ A browser-shaped request without the CSRF header → 403 CSRF_FAILED.
+### This is the forged-request shape: the cookie is sent, but a cross-origin
+### page cannot read it to build the header.
+POST {{api}}/_probe
+Content-Type: application/json
+Origin: http://localhost:5173
+
+{ "n": 5 }
+
+### A foreign origin → 403 ORIGIN_MISMATCH, before the token is even consulted.
+POST {{api}}/_probe
+Content-Type: application/json
+Origin: https://evil.test
+
+{ "n": 5 }
+
+### helmet's headers, on every response.
+GET {{host}}/health
+Accept: application/json
+
+### ★ Still 404. There is no admin surface on the public port, and /metrics is
+### an admin route from S49 (12 §11.1).
+GET {{api}}/metrics
+Accept: application/json

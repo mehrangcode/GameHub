@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { tsxCli } from '../bin.js'
 import { db, resetDb } from '../helpers/db.js'
 
 /**
@@ -8,7 +9,9 @@ import { db, resetDb } from '../helpers/db.js'
  * this proves it.
  */
 function runSeed(nodeEnv: 'development' | 'production'): void {
-  execFileSync('npx', ['tsx', 'prisma/seed.ts'], {
+  // `node <tsx cli>`, not `npx tsx` — see tests/bin.ts for why the shim path
+  // is not portable.
+  execFileSync(process.execPath, [tsxCli(), 'prisma/seed.ts'], {
     cwd: process.cwd(),
     stdio: 'pipe',
     env: { ...process.env, NODE_ENV: nodeEnv, DATABASE_URL: 'file:./test.db' },

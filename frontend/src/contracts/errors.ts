@@ -13,6 +13,13 @@ export const ERROR_CODES = [
   'UNAUTHORIZED',
   'FORBIDDEN',
   'NOT_FOUND',
+  /**
+   * Beyond §5.6's nine REST rows, like the four below it. Registration needs a
+   * code distinct from `VALIDATION_FAILED`: "that email is already registered"
+   * is not a malformed request, and the sign-up form has to render it under the
+   * email field in the reader's language.
+   */
+  'EMAIL_TAKEN',
   'SEAT_TAKEN',
   'ILLEGAL_MOVE',
   'NOT_YOUR_TURN',

@@ -518,6 +518,22 @@ A single Express error middleware and a single socket ack wrapper map `AppError 
 Anything that is *not* an `AppError` is logged at `error` with a request id and returned as an
 opaque `INTERNAL` — never a stack trace to the client.
 
+**Five codes below the table**, added while building and listed here so the contract stays
+discoverable from one place. `contracts/errors.ts` is the source of truth and
+`tests/unit/errors.test.ts` asserts the mapping is total in both directions.
+
+| Error | code | HTTP | Why it is not in the table above |
+|---|---|---|---|
+| `EmailTakenError` | `EMAIL_TAKEN` | 409 | Registration needs a code distinct from `VALIDATION_FAILED`: a taken email is not a malformed request, and the sign-up form renders it under the email field |
+| `IllegalPhaseTransitionError` | `ILLEGAL_PHASE_TRANSITION` | 409 | Surfaces mainly as a socket ack. Well-formed request, wrong game state — Conflict, not Unprocessable |
+| `InsufficientFundsError` | `INSUFFICIENT_FUNDS` | 409 | Deliberately **not** 402: coins are earned, never bought ([10](./10-economy-and-rewards.md) §6.5), and Payment Required would imply a purchasable currency we refuse to have |
+| `CapRejectedError` | `CAP_REJECTED` | 429 | An earn cap is a rate limit on the economy; carries `retryAfterMs` |
+| `SeatNotReclaimableError` | `SEAT_NOT_RECLAIMABLE` | 409 | The reclaim window ([04](./04-realtime-protocol.md) §6.4) has closed |
+
+`fieldErrors` values are **i18n keys too**, not Zod's English messages — see §5.6's rule applied at
+the boundary in `interface/http/middleware/validate.ts`. Zod's own wording is kept in the logged
+`message`, which never crosses the wire.
+
 The admin process extends this table with six codes (`STEP_UP_REQUIRED`, `MFA_REQUIRED`,
 `MFA_ENROLLMENT_REQUIRED`, `ADMIN_LOCKED`, `REASON_REQUIRED`, `SELF_TARGET_FORBIDDEN`) —
 [12](./12-admin-console.md) §5.1. Same `AppError` base, same middleware.
