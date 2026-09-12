@@ -174,6 +174,12 @@ const OBSERVED = [
   'table:statusChanged',
   'table:presence',
   'chat:message',
+  'game:started',
+  'game:state',
+  'game:event',
+  'game:moveRejected',
+  'game:finished',
+  'game:syncRequired',
   'error',
 ] as const
 

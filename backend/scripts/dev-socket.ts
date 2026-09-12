@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { io, type Socket } from 'socket.io-client'
@@ -157,6 +158,9 @@ const cyan = (text: string) => paint('36', text)
 
 const stamp = () => dim(new Date().toISOString().slice(11, 23))
 
+/** The client half of the provable-shuffle check (04 §7). Four lines, on purpose. */
+const sha256 = (value: string) => createHash('sha256').update(value).digest('hex')
+
 function event(name: string, payload: unknown): void {
   console.log(`${stamp()} ${cyan('←')} ${bold(name)} ${format(payload)}`)
 }
@@ -210,6 +214,10 @@ const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io(options.ur
 })
 
 let joined: string | null = null
+/** The game this client is watching, learned from `game:started`. */
+let game: string | null = null
+/** What a real client tracks for gap detection (04 §5.1). `requestSync` uses it. */
+let lastSeq = 0
 
 socket.on('connect', () => {
   console.log(`${stamp()} ${green('●')} connected ${dim(socket.id ?? '')}`)
@@ -263,6 +271,52 @@ socket.on('table:presence', (payload) => event('table:presence', payload))
 socket.on('chat:message', (payload) => event('chat:message', payload.message))
 socket.on('error', (payload) => event(red('error'), payload))
 
+// ── Phase G ──────────────────────────────────────────────────────────────────
+
+socket.on('game:started', (payload) => {
+  game = payload.gameId
+  lastSeq = payload.seq
+  event('game:started', payload)
+  console.log(
+    dim(
+      `  store this commit now: ${payload.seedCommit.slice(0, 16)}…  ` +
+        `verify it against the seed in game:finished`,
+    ),
+  )
+})
+
+/**
+ * ★ The event to compare between two terminals.
+ *
+ * Print it whole, deliberately. The entire point of the S30 verification step
+ * is putting two of these side by side and seeing that terminal 1 carries its
+ * own `secret` and terminal 2 does not — from one state on the server.
+ */
+socket.on('game:state', (payload) => {
+  lastSeq = payload.seq
+  event('game:state', payload)
+})
+
+socket.on('game:event', (payload) => {
+  // Narration is public and ordered; `seq` here is what a real client watches
+  // for gaps with.
+  lastSeq = Math.max(lastSeq, payload.seq)
+  event('game:event', payload)
+})
+
+socket.on('game:moveRejected', (payload) => event(red('game:moveRejected'), payload))
+socket.on('game:syncRequired', (payload) => event(yellow('game:syncRequired'), payload))
+
+socket.on('game:finished', (payload) => {
+  event('game:finished', payload)
+  const ok = sha256(payload.seedRevealed + payload.gameId) === payload.seedCommit
+  console.log(
+    ok
+      ? green('  ✓ deal verified — sha256(seed + gameId) matches the commit from game:started')
+      : red('  ✗ DEAL DOES NOT VERIFY — the commit and the revealed seed disagree'),
+  )
+})
+
 /** Emits with an ack, printing whichever arm comes back. */
 function send(name: string, payload: unknown): void {
   ;(
@@ -278,6 +332,28 @@ function requireTable(): string | null {
   return null
 }
 
+function requireGame(): string | null {
+  if (game !== null) return game
+  console.log(yellow('  ! no game yet — somebody has to `start` one (host only)'))
+  return null
+}
+
+/**
+ * Emits a move with a fresh `clientMoveId` every time.
+ *
+ * Fresh, not fixed: reusing one would make every command after the first come
+ * back `replayed: true`, which looks exactly like a broken handler. To *see*
+ * idempotency working, send the same id twice with `raw game:move {…}`.
+ */
+let moveCounter = 0
+function sendMove(move: Record<string, unknown>): void {
+  const gameId = requireGame()
+  if (gameId === null) return
+
+  moveCounter += 1
+  send('game:move', { gameId, move, clientMoveId: `dev-${Date.now()}-${moveCounter}` })
+}
+
 const COMMANDS = `
 ${bold('commands')}
   join <tableId> [spectator]   table:join
@@ -291,6 +367,14 @@ ${bold('commands')}
   chat <text>                  chat:send
   emote <id>                   chat:emote
   beat                         presence:heartbeat
+
+${bold('the game')} ${dim('(Phase G)')}
+  start                        game:start           ${dim('(host only)')}
+  press                        game:move {"kind":"press"}
+  pass                         game:move {"kind":"pass"}
+  move <json>                  game:move with any body at all
+  sync [lastSeq]               game:requestSync     ${dim('(omit for a full resync)')}
+  seq                          what this client thinks lastSeq is
   spam <n>                     n chat messages fast ${dim('(watch RATE_LIMITED)')}
   raw <event> <json>           anything at all      ${dim('(try raw table:takeSeat {"tableId":"x","seat":1,"userId":"someone"})')}
   quit
@@ -392,6 +476,40 @@ repl.on('line', (line) => {
             send('chat:send', { tableId, body: `spam ${index}` })
           }
         }
+        break
+      }
+      case 'start': {
+        const tableId = requireTable()
+        if (tableId !== null) send('game:start', { tableId })
+        break
+      }
+      case 'press':
+      case 'pass': {
+        sendMove({ kind: command })
+        break
+      }
+      case 'move': {
+        // Takes an arbitrary body so an illegal move can be tried by hand —
+        // `move {"kind":"detonate"}` is how you see ILLEGAL_MOVE and the AUDIT
+        // row it writes.
+        sendMove(JSON.parse(argument || '{"kind":"press"}') as Record<string, unknown>)
+        break
+      }
+      case 'sync': {
+        const gameId = requireGame()
+        if (gameId !== null) {
+          const at = rest[0]
+          send('game:requestSync', {
+            gameId,
+            // No argument means *no* `lastSeq`, which is the always-correct
+            // full resync — not `lastSeq: 0`, which is a delta of everything.
+            ...(at === undefined ? {} : { lastSeq: Number(at) }),
+          })
+        }
+        break
+      }
+      case 'seq': {
+        console.log(dim(`  game=${game ?? '(none)'}  lastSeq=${String(lastSeq)}`))
         break
       }
       case 'raw': {

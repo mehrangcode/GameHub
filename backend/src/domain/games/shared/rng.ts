@@ -134,3 +134,54 @@ export function commitSeed(seed: string, gameId: string): string {
     .update(seed + gameId)
     .digest('hex')
 }
+
+/**
+ * A hex seed drawn from an {@link Rng} — 32 bytes by default, matching 04 §7's
+ * `crypto.randomBytes(32).hex()`.
+ *
+ * Drawn through the `Rng` port rather than calling `randomBytes` directly so the
+ * whole of `createInstance` is exercisable with `createSeededRng`, and so the
+ * one production source of entropy stays `createSecureRng`. A test that wants a
+ * predictable seed hands in a seeded generator; production hands in the CSPRNG
+ * and gets 256 bits either way.
+ */
+export function generateSeed(rng: Rng, bytes = 32): string {
+  if (!Number.isInteger(bytes) || bytes <= 0) {
+    throw new RangeError(`bytes must be a positive integer, got ${String(bytes)}`)
+  }
+  let hex = ''
+  for (let index = 0; index < bytes; index += 1) {
+    hex += rng.int(256).toString(16).padStart(2, '0')
+  }
+  return hex
+}
+
+/**
+ * ★ The per-transition generator — the thing that makes snapshots and replay
+ * agree.
+ *
+ * A single `Rng` shared across a whole game would be correct only as long as
+ * every rebuild replayed from event 0: the stream's position is a function of
+ * how many draws happened before, and a snapshot at `seq 25` records the
+ * *state* but not that position. Rebuilding from it and replaying events 26
+ * onward would then deal different cards than the live game did — a bug that
+ * stays invisible until the first game long enough to snapshot.
+ *
+ * So randomness is keyed by the log instead: every state transition gets a
+ * fresh generator seeded `{rngSeed}:{seq}`, where `seq` is the sequence number
+ * of the **input event** that caused it. That number is assigned by the
+ * database, is recorded in the log, and is identical on every replay — which
+ * makes a transition reproducible from `(rngSeed, seq)` alone, with or without
+ * a snapshot in front of it.
+ *
+ * ★ It is deliberately **not** keyed by `clientMoveId`. That value is chosen by
+ * the client, and keying randomness on it would let a player who does not like
+ * the card they are about to draw retry the same move under a different id
+ * until the deck obliges (07 §4). `seq` is ours.
+ */
+export function gameRng(rngSeed: string, key: number | string): Rng {
+  return createSeededRng(`${rngSeed}:${key}`)
+}
+
+/** The generator that deals. Keyed so it can never collide with a transition. */
+export const DEAL_RNG_KEY = 'deal'

@@ -38,6 +38,38 @@ export const SEAT_CHANGE_RULE: RateLimitRule = { limit: 5, windowMs: 10_000 }
 export const TABLE_JOIN_RULE: RateLimitRule = { limit: 20, windowMs: 10_000 }
 
 /**
+ * `game:move` — 10 per 5 s per socket (04 §8).
+ *
+ * Per socket, because the cost is server work on one connection. The real
+ * protection against a move flood is not this number at all: a seat that is not
+ * to act gets `NOT_YOUR_TURN` from the engine, which is cheaper than a limiter
+ * and produces an `AUDIT` row the limiter would not. This is the backstop for a
+ * client looping on its *own* turn.
+ */
+export const GAME_MOVE_RULE: RateLimitRule = { limit: 10, windowMs: 5_000 }
+
+/**
+ * `game:requestSync` — 3 per 10 s (04 §8).
+ *
+ * Tighter than `table:join` despite both being reconnection traffic, because a
+ * sync is genuinely expensive (a rebuild plus a projection) where a join is
+ * not. A client that needs a fourth sync in ten seconds has a bug, and serving
+ * it faster would only hide the bug under load.
+ */
+export const GAME_SYNC_RULE: RateLimitRule = { limit: 3, windowMs: 10_000 }
+
+/**
+ * ★ The illegal-move throttle — 5 rejections in 30 s per identity (04 §8).
+ *
+ * Not a rate limit: exceeding it refuses nothing. It promotes the *next*
+ * `SecurityEvent` from `INFO` to `ALERT`, because one rejected move is a
+ * mis-click and five in half a minute is somebody walking the move grammar to
+ * see what the server accepts — which is the clearest probing signal this
+ * protocol produces, and the one thing here worth waking a human for.
+ */
+export const ILLEGAL_MOVE_ALERT_RULE: RateLimitRule = { limit: 5, windowMs: 30_000 }
+
+/**
  * Handshake failures — 10 per minute per IP.
  *
  * The only budget that applies *before* identity exists, which is why it is

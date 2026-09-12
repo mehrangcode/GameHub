@@ -264,3 +264,207 @@ curl -si localhost:3999/ready | head -1        # → 503, honestly reported
 docker compose start redis
 curl -si localhost:3999/ready | head -1        # → 200 again
 ```
+
+---
+
+# Phase G (S28–S30) — the game itself
+
+Everything above establishes who is at the table. This is where cards appear —
+and where the two terminals stop agreeing, on purpose.
+
+The setup is the same as §0, with **one change**: `fixture` is playable by 2, 3
+or 4, and `game:start` validates the _occupied_ seats, so create a 2-seat table
+and fill both.
+
+```bash
+API=localhost:3999/api/v1
+
+curl -sc /tmp/c.txt -X POST $API/auth/register -H 'content-type: application/json' \
+  -d '{"email":"me@test.dev","password":"correct-horse-battery","displayName":"Mehrang"}' >/dev/null
+
+TID=$(curl -sb /tmp/c.txt -X POST $API/tables -H 'content-type: application/json' \
+  -d '{"gameSlug":"fixture","seatCount":2,"options":{"target":3}}' | jq -r .id)
+
+CODE=$(curl -sb /tmp/c.txt -X POST $API/tables/$TID/invites \
+  -H 'content-type: application/json' -d '{}' | jq -r .code)
+
+curl -sc /tmp/g.txt -X POST $API/auth/guest -H 'content-type: application/json' \
+  -d "{\"inviteCode\":\"$CODE\",\"displayName\":\"Sara\"}" | jq -r .identity.displayName
+```
+
+---
+
+## S30 — ★ the two terminals that must disagree
+
+```bash
+# ── terminal 1 — the host, seat 0 ─────────────────────────────────────────
+npx tsx scripts/dev-socket.ts --url http://localhost:3999 --cookies /tmp/c.txt \
+  --join $TID --seat 0
+
+# ── terminal 2 — the guest, seat 1 ────────────────────────────────────────
+npx tsx scripts/dev-socket.ts --url http://localhost:3999 --cookies /tmp/g.txt \
+  --join $TID --seat 1
+```
+
+**Terminal 1:** `start`
+
+Both terminals print, in this order:
+
+```
+← game:started { gameId, gameSlug: 'fixture', seedCommit: '<64 hex>', seating: […] }
+  store this commit now: …    verify it against the seed in game:finished
+← game:state { seq: 0, phase: 'PLAYING', view: { …, secret: … }, toAct: 0, legalMoves: … }
+```
+
+### ★★ THE ONE THING TO LOOK HARDEST AT
+
+Put the two `game:state` payloads side by side.
+
+|                 | terminal 1 (seat 0) | terminal 2 (seat 1)            |
+| --------------- | ------------------- | ------------------------------ |
+| `view.secret`   | a 7-digit number    | **a different** 7-digit number |
+| `legalMoves`    | `[{press},{pass}]`  | **`null`**                     |
+| everything else | identical           | identical                      |
+
+Neither terminal's payload contains the other's number **anywhere** — not
+nested, not in a key, not in a debug field. That difference is produced by one
+server-side state passing through `projectState` twice, once per viewer, and it
+is the entire anti-cheat architecture made visible. If the two `secret` values
+are ever equal, or either payload contains both, stop and read
+`GameSessionService.broadcastState`.
+
+`legalMoves` being `null` for seat 1 is the same idea in miniature: it is a
+convenience for whoever is to act, and harmless here only because this game has
+nothing to hide in it. In Poker, "can you raise?" answers "how much is in front
+of you?".
+
+### Then play
+
+```
+# terminal 1
+press            # → ✓ { seq: 1, replayed: false }
+                 #   both terminals: ← game:event { seq:1, descriptor:{ key:'games.fixture.move.press' } }
+                 #   both terminals: ← game:state  { seq:1, toAct: 1 }
+
+press            # → ✗ NOT_YOUR_TURN   (and ← game:moveRejected on this socket only)
+move {"kind":"detonate"}
+                 # → ✗ ILLEGAL_MOVE
+
+# terminal 2
+press            # → ✓ { seq: 3 }  ← note the 3: the rejected move above is an
+                 #   AUDIT row in the same ordered stream, so it cost a seq.
+                 #   It did not cost a turn.
+```
+
+**The descriptor is the thing to check in `game:event`.** It must be
+`{ key: 'games.fixture.move.press', params: { seat: 0 } }` — an i18n key and
+parameters. If you ever see `"Mehrang pressed the button"` there, the move log
+has become untranslatable and a Persian reader gets English forever.
+
+### The impersonation attempts, both shapes
+
+```
+raw game:move {"gameId":"<GID>","move":{"kind":"press"},"clientMoveId":"x","seat":0}
+→ ✗ VALIDATION_FAILED { seat: ['errors.field.unknownKey'] }
+```
+
+_Rejected_, not ignored: there is no `seat` field on `game:move` and every
+schema is `.strict()`, so there is nothing to claim to be somebody else _with_.
+
+```
+# from terminal 2, when it is NOT its turn:
+move {"kind":"press","seat":0}
+→ ✗ NOT_YOUR_TURN
+```
+
+The seat inside the `move` body is accepted as _data_ — `move` is opaque to the
+transport, because its grammar belongs to the engine — and then simply not read.
+The acting seat came from the socket. Both defences are real; the first is
+structural and the second is architectural.
+
+### Finish it, and verify the deal
+
+Press until somebody reaches `target` (3 by default here).
+
+```
+← game:finished { reason: 'NORMAL', standings: [...], seedRevealed: '<64 hex>', seedCommit: '<64 hex>' }
+  ✓ deal verified — sha256(seed + gameId) matches the commit from game:started
+```
+
+`dev-socket` runs that check itself, which is exactly what the browser will do
+on the match summary (04 §7). And the operator's copy:
+
+```bash
+npx tsx scripts/dev-verify-commit.ts --latest
+#   or --game <gameId>, or --table $TID
+```
+
+---
+
+## S29 — the restart, and the resync
+
+**This is the one to actually watch.** Start a game, play a few moves, then:
+
+```bash
+# terminal 1, mid-game:
+press
+press
+seq              # → game=<gameId>  lastSeq=2
+
+# ── now kill the server. Ctrl-C the `npm run dev` terminal. ────────────────
+# Both sockets print  ○ disconnected  and start reconnecting.
+
+PORT=3999 npm run dev        # restart it
+```
+
+The clients reconnect on their own. Then, in terminal 1:
+
+```
+join <TID>       # the sockets are new, so re-join the rooms
+sync 0           # → ✓ { mode: 'delta', fromSeq: 1, toSeq: 2 }
+                 #   ← game:event ×2, then ← game:state — the state you had
+sync             # ★ no argument → ✓ { mode: 'full', fromSeq: null, toSeq: 2 }
+                 #   ← game:started (the commit again), then ← game:state
+press            # and the game carries on from exactly where it was
+```
+
+**Nothing was lost, and nothing was in memory to lose.** State is rebuilt from
+`snapshot + events` on every single move, which is why a deploy mid-hand costs
+players a reconnect rather than a game. Look at the `counts` in that
+`game:state` after the restart: they are the presses from before it.
+
+`sync` with no argument is deliberately _not_ `sync 0`. No `lastSeq` at all
+means "I cannot be reconciled" and gets a **full** — the mode that is always
+correct. `sync 0` means "I am at the beginning", which is a delta of everything
+and only cheaper while the game is short.
+
+```
+sync
+sync
+sync
+sync             # → ✗ RATE_LIMITED { bucket: 'requestSync' }, retryAfterMs
+```
+
+3 per 10 s (04 §8). A client needing a fourth sync in ten seconds has a bug, and
+serving it faster would hide the bug under load.
+
+---
+
+## S28 — the log, in Prisma Studio
+
+```bash
+npm run db:studio
+```
+
+| Table           | What to look for                                                                                                                                                                                          |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GameInstance`  | `seedCommit` 64 hex; `rngSeed` 64 hex; `seedRevealedAt` **null while ACTIVE**, set on FINISHED; `seq` equal to the newest event's; `seatingJson` naming who sat where                                     |
+| `GameEvent`     | **contiguous `seq`, no gaps**; one `MOVE` per press; an `AUDIT` row for each rejected move, carrying `code` and the attempted move in its payload; `clientMoveId` set on moves and **null on AUDIT rows** |
+| `GameSnapshot`  | a row every 25 events, and always one at `FINISHED`. Delete them all and replay still works — they are a cache, the log is the truth                                                                      |
+| `SecurityEvent` | `ILLEGAL_MOVE` / `NOT_YOUR_TURN` at `INFO`, escalating to `ALERT` on the sixth in thirty seconds                                                                                                          |
+
+**The AUDIT row's `clientMoveId` column being null is worth a second look.** The
+key lives in the _payload_ instead, because `(gameId, clientMoveId)` is the
+unique constraint that recognises a retry — a rejected move holding that slot
+would make the player's corrected retry come back "already applied", and they
+would be stuck with no way to play.

@@ -83,6 +83,29 @@ export const COUNTERS = [
   'chat_emotes',
   'chat_rate_limited',
   'redis_degraded',
+
+  // Phase G. Three of these are the ones worth watching:
+  //
+  //   `moves_replayed` counts `clientMoveId`s that collided — the database
+  //   refusing to play a card twice. Like `wallet_credits_replayed`, a spike
+  //   means something upstream is retrying and a permanent zero probably means
+  //   the client stopped sending stable keys.
+  //
+  //   `game_rebuilds` against `moves_applied` is roughly 1:1 by design, because
+  //   state is never held in memory. If it ever drifts far above that, some
+  //   path is rebuilding for a read it could have taken from the broadcast.
+  //
+  //   `game_states_projected` divided by `moves_applied` is the table's average
+  //   viewer count — and, more usefully, it is *supposed* to be a multiple: a
+  //   value equal to `moves_applied` would mean one payload per move, which is
+  //   the broadcast-the-state bug this architecture exists to make impossible.
+  'game_rebuilds',
+  'moves_replayed',
+  'game_snapshots_written',
+  'game_states_projected',
+  'game_resyncs_full',
+  'game_resyncs_delta',
+  'game_snapshots_pruned',
 ] as const
 
 /** Point-in-time values that go up and down. */

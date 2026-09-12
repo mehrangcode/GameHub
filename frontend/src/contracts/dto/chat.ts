@@ -103,6 +103,8 @@ export const SYSTEM_MESSAGE_KEYS = {
   optionsChanged: 'table.system.optionsChanged',
   playerDisconnected: 'table.system.playerDisconnected',
   playerReconnected: 'table.system.playerReconnected',
+  gameStarted: 'table.system.gameStarted',
+  gameFinished: 'table.system.gameFinished',
 } as const
 
 export type SystemMessageKey = (typeof SYSTEM_MESSAGE_KEYS)[keyof typeof SYSTEM_MESSAGE_KEYS]

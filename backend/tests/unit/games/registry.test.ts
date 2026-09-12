@@ -154,8 +154,21 @@ describe('the dev-only fixture game', () => {
 
 describe('engines', () => {
   it('requireEngine throws for a game that has none yet', () => {
-    expect(() => devRegistry.requireEngine('fixture')).toThrow(NotFoundError)
-    expect(devRegistry.engine('fixture')).toBeUndefined()
+    // Every *public* game is still `comingSoon` at M0; Sudoku is M1.
+    expect(() => devRegistry.requireEngine('shelem')).toThrow(NotFoundError)
+    expect(devRegistry.engine('shelem')).toBeUndefined()
+  })
+
+  it('★ fixture has an engine wherever it has a meta — and nowhere else', () => {
+    // The two are gated by one flag on purpose. A registry that carried the
+    // engine without the catalog entry would throw at construction; one that
+    // carried the meta without the engine would advertise a slug `game:start`
+    // could not deal, which is the state S17 shipped and S30 ends.
+    expect(devRegistry.engine('fixture')).toBeDefined()
+    expect(devRegistry.requireEngine('fixture').meta.slug).toBe('fixture')
+
+    expect(publicRegistry.has('fixture')).toBe(false)
+    expect(publicRegistry.engine('fixture')).toBeUndefined()
   })
 
   it('refuses an engine with no catalog entry', () => {

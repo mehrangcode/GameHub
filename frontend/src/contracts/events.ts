@@ -6,7 +6,14 @@ import { CHAT_BODY_MAX, EMOTE_ID_MAX, type ChatMessageView } from './dto/chat.js
 import type { PresenceState } from './dto/presence.js'
 import type { MemberView, OccupantView, TableDetail } from './dto/tables.js'
 import type { Identity } from './dto/auth.js'
-import { BotDifficultySchema, type MemberRole, type TableStatus } from './enums.js'
+import {
+  BotDifficultySchema,
+  type GameEventKind,
+  type MatchReason,
+  type MemberRole,
+  type SeatOutcome,
+  type TableStatus,
+} from './enums.js'
 import type { ErrorCode, SocketAck } from './errors.js'
 
 /**
@@ -128,6 +135,62 @@ export type ChatEmotePayload = z.infer<typeof ChatEmotePayloadSchema>
 export const HeartbeatPayloadSchema = z.object({ tableId }).strict()
 export type HeartbeatPayload = z.infer<typeof HeartbeatPayloadSchema>
 
+// ── Phase G: the game itself ─────────────────────────────────────────────────
+
+const gameId = z.string().min(1).max(64)
+
+/**
+ * A client-chosen idempotency key — 03 §4.4.
+ *
+ * It is written to `GameEvent.clientMoveId`, where `(gameId, clientMoveId)` is
+ * unique, so a socket retry after a dropped ack returns the original ack
+ * instead of playing a second card. Bounded because it lands in a database
+ * column and an unbounded string from an untrusted client is a free write
+ * amplification.
+ *
+ * ★ It is an *idempotency* key and nothing more. Nothing on the server is
+ * derived from it — in particular not the deal randomness (see `gameRng` in
+ * `domain/games/shared/rng.ts`), because a client that could pick the seed of
+ * its own draw could retry until the deck obliged.
+ */
+const clientMoveId = z.string().trim().min(1).max(64)
+
+/** Host only. Validates the seat count against `meta.playableCounts`. */
+export const GameStartPayloadSchema = z.object({ tableId }).strict()
+export type GameStartPayload = z.infer<typeof GameStartPayloadSchema>
+
+/**
+ * ★ The core event — 04 §3.1, 05 §6.
+ *
+ * Note what is **not** here: no `seat`. The acting seat is looked up
+ * server-side from `TableMember` by the socket's frozen identity, so a payload
+ * claiming seat 2 is not merely ignored — there is no field to claim it in, and
+ * `.strict()` rejects the attempt outright.
+ *
+ * `move` is an opaque record: its shape belongs to the engine, which parses it
+ * and throws `ILLEGAL_MOVE` for anything it does not recognise. Validating it
+ * here would mean the transport knowing six games' move grammars, and would put
+ * the enforcement point somewhere other than `applyMove` (I3).
+ */
+export const GameMovePayloadSchema = z
+  .object({ gameId, move: z.record(z.unknown()), clientMoveId })
+  .strict()
+
+export type GameMovePayload = z.infer<typeof GameMovePayloadSchema>
+
+/**
+ * Explicit resync — 04 §5.3.
+ *
+ * `lastSeq` is optional on purpose: a client that has no idea where it stands
+ * omits it and gets a `full`, which is *always* correct. Never guess at
+ * reconciliation.
+ */
+export const GameRequestSyncPayloadSchema = z
+  .object({ gameId, lastSeq: z.number().int().min(0).optional() })
+  .strict()
+
+export type GameRequestSyncPayload = z.infer<typeof GameRequestSyncPayloadSchema>
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Server → client payloads
 // ═══════════════════════════════════════════════════════════════════════════
@@ -212,6 +275,121 @@ export interface ChatMessagePayload {
   readonly message: ChatMessageView
 }
 
+// ── Phase G: the game itself ─────────────────────────────────────────────────
+
+/**
+ * Who sat where when the deal started.
+ *
+ * Ids are deliberately absent, exactly as in `OccupantView`: this goes to
+ * everyone at the table, spectators included, and a seat map is the wrong place
+ * to hand out account identifiers.
+ */
+export interface SeatingView {
+  readonly seat: number
+  readonly displayName: string
+  readonly isBot: boolean
+  readonly team: number | null
+}
+
+/**
+ * ★ Published **before** any card exists — 03 §5, 04 §7, 07 §4.2.
+ *
+ * `seedCommit` is `sha256(rngSeed + gameId)`. Clients store it now and verify it
+ * against the `seedRevealed` in `game:finished` later, which is what makes "the
+ * server cannot have chosen the deal after seeing anyone's cards" a checkable
+ * claim rather than a promise.
+ *
+ * There is no `rngSeed` field on this payload, and a test asserts the seed
+ * appears in no payload at all before `finishedAt`.
+ */
+export interface GameStartedPayload {
+  readonly tableId: string
+  readonly gameId: string
+  readonly gameSlug: string
+  readonly seedCommit: string
+  readonly seating: readonly SeatingView[]
+  readonly startedAt: string
+  readonly seq: number
+}
+
+/**
+ * ★ The personalized projection — 04 §4, the anti-cheat boundary made a wire
+ * format.
+ *
+ * This payload is produced **once per viewer** by `projectState(state, viewer)`
+ * and sent to that viewer's room alone. There is deliberately no code path that
+ * sends one `game:state` to two different seats; `tests/unit/socket/projection-boundary.test.ts`
+ * fails the build if one appears.
+ *
+ * `legalMoves` is present only for the seat that is to act, and it is a
+ * *convenience for the UI* — `applyMove` is the enforcement point, and it throws
+ * for anything outside that list whether or not the client ever saw it.
+ */
+export interface GameStatePayload {
+  readonly gameId: string
+  readonly tableId: string
+  /** Monotonic; the client drops anything `<= lastSeq` and resyncs on a gap. */
+  readonly seq: number
+  readonly phase: string | null
+  /** Already projected. The client renders this verbatim and derives nothing. */
+  readonly view: unknown
+  readonly toAct: number | null
+  readonly legalMoves: readonly unknown[] | null
+  readonly isTerminal: boolean
+  readonly serverTime: number
+}
+
+/**
+ * Public narration — "Sara played ♠A" — as an i18n key plus params, never prose.
+ *
+ * Named `GameNarrationPayload` rather than `GameEventPayload` because the
+ * domain already owns that name for what an *engine* emits
+ * (`domain/games/GameEngine.ts`). They are different things: one is the record
+ * written to the log, this is what the table is told about it.
+ */
+export interface GameNarrationPayload {
+  readonly gameId: string
+  readonly tableId: string
+  readonly seq: number
+  readonly kind: GameEventKind
+  readonly seat: number | null
+  /** i18n key + params, or `null` for an event with nothing to say out loud. */
+  readonly descriptor: { readonly key: string; readonly params: Record<string, unknown> } | null
+}
+
+/** To the offender's socket only. The same refusal also lands in the ack. */
+export interface GameMoveRejectedPayload {
+  readonly gameId: string
+  readonly clientMoveId: string
+  readonly code: ErrorCode
+  readonly i18nKey: string
+  readonly details?: Record<string, unknown>
+}
+
+/** The seed is revealed **here** and nowhere earlier (04 §7). */
+export interface GameFinishedPayload {
+  readonly gameId: string
+  readonly tableId: string
+  readonly seq: number
+  readonly reason: MatchReason
+  readonly winningTeam: number | null
+  readonly standings: readonly {
+    readonly seat: number
+    readonly rank: number
+    readonly score: number
+    readonly outcome: SeatOutcome
+  }[]
+  readonly summary: Record<string, unknown>
+  readonly seedRevealed: string
+  readonly seedCommit: string
+}
+
+/** The server noticed this client is behind. It must answer `game:requestSync`. */
+export interface GameSyncRequiredPayload {
+  readonly gameId: string
+  readonly reason: 'GAP' | 'AHEAD_OF_SERVER' | 'UNKNOWN_POSITION'
+}
+
 /**
  * Out-of-band errors — the ones with no ack to answer.
  *
@@ -242,6 +420,35 @@ export interface ChatSendResult {
   readonly messageId: string
 }
 
+export interface GameStartResult {
+  readonly gameId: string
+  readonly gameSlug: string
+  readonly seedCommit: string
+  readonly seq: number
+}
+
+/**
+ * `replayed: true` means the `clientMoveId` had already been used and the
+ * server answered from the log instead of playing the move again (03 §4.4).
+ *
+ * It is reported rather than hidden because the two cases are genuinely
+ * different to a client that is retrying: `false` means "your move landed
+ * now", `true` means "it had already landed, stop retrying".
+ */
+export interface GameMoveResult {
+  readonly gameId: string
+  readonly seq: number
+  readonly replayed: boolean
+}
+
+export interface GameSyncResult {
+  readonly gameId: string
+  readonly mode: 'delta' | 'full'
+  /** The first event replayed, or `null` for a `full` (there is nothing to replay). */
+  readonly fromSeq: number | null
+  readonly toSeq: number
+}
+
 /** Every client→server event answers with one of these. */
 export type AckFn<T> = (ack: SocketAck<T>) => void
 
@@ -262,6 +469,18 @@ export interface ServerToClientEvents {
 
   'chat:message': (payload: ChatMessagePayload) => void
 
+  /**
+   * ★ `game:state` goes to `seat:{id}:{n}` and to `spectators:{id}` — never to
+   * `table:{id}`, which holds both. Everything else here is public by
+   * construction.
+   */
+  'game:started': (payload: GameStartedPayload) => void
+  'game:state': (payload: GameStatePayload) => void
+  'game:event': (payload: GameNarrationPayload) => void
+  'game:moveRejected': (payload: GameMoveRejectedPayload) => void
+  'game:finished': (payload: GameFinishedPayload) => void
+  'game:syncRequired': (payload: GameSyncRequiredPayload) => void
+
   error: (payload: SocketErrorPayload) => void
 }
 
@@ -279,6 +498,10 @@ export interface ClientToServerEvents {
   'chat:emote': (payload: ChatEmotePayload, ack: AckFn<ChatSendResult>) => void
 
   'presence:heartbeat': (payload: HeartbeatPayload, ack: AckFn<undefined>) => void
+
+  'game:start': (payload: GameStartPayload, ack: AckFn<GameStartResult>) => void
+  'game:move': (payload: GameMovePayload, ack: AckFn<GameMoveResult>) => void
+  'game:requestSync': (payload: GameRequestSyncPayload, ack: AckFn<GameSyncResult>) => void
 }
 
 /** Nothing travels between server instances directly — the Redis adapter does it. */

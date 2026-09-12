@@ -91,6 +91,29 @@ function toOccupantView(member: TableMember, directory: OccupantDirectory): Occu
   }
 }
 
+/**
+ * The name to **freeze** into `GameInstance.seating` at the deal (03 §3.3).
+ *
+ * Distinct from `toOccupantView`'s nullable `displayName` because this one is
+ * history: the seating snapshot exists precisely so a match summary still reads
+ * correctly after the player renamed themselves, left, or was replaced by a
+ * bot. A `null` there would make a finished match unattributable, so the two
+ * unnameable cases each get a key-shaped placeholder rather than English prose
+ * (02 §8.1) — the client renders it, and `isBot` is already on the payload.
+ */
+export function seatingNameOf(member: TableMember, directory: OccupantDirectory): string {
+  if (member.isBot) return `bot.${member.botDifficulty ?? 'medium'}`
+
+  const profile =
+    member.userId !== null
+      ? directory.users.get(member.userId)
+      : member.guestSessionId !== null
+        ? directory.guests.get(member.guestSessionId)
+        : undefined
+
+  return profile?.displayName ?? 'player.unknown'
+}
+
 const EMPTY_SEAT = (seat: SeatId): SeatView => ({
   seat,
   memberId: null,

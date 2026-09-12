@@ -6,7 +6,19 @@ import type { Draft, IRepository } from './IRepository.js'
 export type NewGameInstance = Draft<
   GameInstance,
   'status' | 'seedRevealedAt' | 'seq' | 'startedAt' | 'finishedAt'
->
+> & {
+  /**
+   * ★ The one entity in the schema whose id the **caller** may choose, and the
+   * reason is the commitment: `seedCommit = sha256(rngSeed + id)` has to be
+   * computed before the row exists, because it is published before the deal
+   * (03 §5, 04 §7). Letting the database mint the id would force a
+   * create-then-update, and for the window between those two writes the
+   * committed value on disk would be wrong.
+   *
+   * Omit it and the database's `cuid()` default applies, exactly as before.
+   */
+  readonly id?: string
+}
 
 export interface IGameInstanceRepository extends IRepository<GameInstance> {
   create(data: NewGameInstance): Promise<GameInstance>

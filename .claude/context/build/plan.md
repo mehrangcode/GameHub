@@ -104,9 +104,13 @@ _Built and green (1338 backend tests, up from 829). Awaiting Mehrang's "You veri
 
 ### Phase G — Event log
 
-- [ ] S28 `GameInstance` + seed commitment + `GameEvent` append with `seq`
-- [ ] S29 Snapshot policy, `rebuildState`, delta/full resync
-- [ ] S30 The `_fixture` engine + `GameSessionService` move pipeline
+_Built and green (1427 backend tests, up from 1338). Awaiting Mehrang's "You verify" pass — see
+`context.md` for the exact commands, and `backend/requests/socket.md` for the two-terminal walk
+where the projections visibly differ._
+
+- [✅] S28 `GameInstance` + seed commitment + `GameEvent` append with `seq`
+- [✅] S29 Snapshot policy, `rebuildState`, delta/full resync
+- [✅] S30 The `_fixture` engine + `GameSessionService` move pipeline
 
 ### Phase H — Turn enforcement
 

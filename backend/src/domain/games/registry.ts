@@ -1,4 +1,5 @@
 import { NotFoundError } from '../errors/errors.js'
+import { fixtureEngine } from './_fixture/engine.js'
 import { fixtureMeta } from './_fixture/meta.js'
 import { blackjackMeta } from './blackjack/meta.js'
 import { chessMeta } from './chess/meta.js'
@@ -62,7 +63,15 @@ export interface GameRegistryOptions {
    * game nobody wrote a renderer, a reward rule or a bot for.
    */
   readonly includeDevGames?: boolean
-  /** Engines by slug. Empty until S30 registers `_fixture`. */
+  /**
+   * Engines by slug, **in addition to** the built-in ones.
+   *
+   * The only built-in today is `fixture`, and it follows `includeDevGames`
+   * rather than being listed here: an engine whose meta is absent from the
+   * catalog is a construction error, so the two must be gated by one flag or a
+   * production registry could be built that throws. M1 onward adds real engines
+   * to `BUILT_IN_ENGINES` alongside their metas.
+   */
   readonly engines?: readonly AnyGameEngine[]
 }
 
@@ -76,7 +85,9 @@ export function buildGameRegistry(options: GameRegistryOptions = {}): GameRegist
   const bySlug = new Map(metas.map((meta) => [assertValidMeta(meta).slug, meta]))
 
   const engines = new Map<string, AnyGameEngine>()
-  for (const engine of options.engines ?? []) {
+  const builtIn = includeDevGames ? [fixtureEngine] : []
+
+  for (const engine of [...builtIn, ...(options.engines ?? [])]) {
     if (!bySlug.has(engine.meta.slug)) {
       throw new TypeError(
         `engine '${engine.meta.slug}' has no catalog entry — add its meta to registry.ts first`,

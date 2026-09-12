@@ -17,14 +17,19 @@ export class InMemoryGameInstanceRepository implements IGameInstanceRepository {
   readonly rows = new Collection<GameInstance>('GameInstance')
 
   async create(data: NewGameInstance): Promise<GameInstance> {
+    // `...data` last would overwrite the generated id with an explicit
+    // `undefined` whenever the caller omitted one — Prisma treats that as "use
+    // the default", and a fake that did not would disagree with the database on
+    // the commonest call of all.
+    const { id, ...rest } = data
     return this.rows.insert({
-      id: nextId('gam'),
+      id: id ?? nextId('gam'),
       status: 'ACTIVE',
       seedRevealedAt: null,
       seq: 0,
       finishedAt: null,
       startedAt: new Date(),
-      ...data,
+      ...rest,
     })
   }
 

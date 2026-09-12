@@ -1,18 +1,106 @@
 # Live Context — read this first, every session
 
-**Last updated:** 2026-09-09
+**Last updated:** 2026-09-12
 
 ## Where we are
 
 | | |
 |---|---|
 | **Milestone** | M0 — Platform Skeleton |
-| **Last session completed** | **S01–S27 (Phases A + B + C + D + E + F) built and green — not yet verified by Mehrang** |
-| **Next session** | **S28 — `GameInstance` + seed commitment + `GameEvent` append with `seq`** (3 h, 🧪) — starts Phase G |
+| **Last session completed** | **S01–S30 (Phases A + B + C + D + E + F + G) built and green — not yet verified by Mehrang** |
+| **Next session** | **S31 — `TurnTimerService`, absolute deadlines, `game:turnTimer`** (3 h, 🔌) — starts Phase H |
 | **Blocked on** | Nothing in code. The two older environment items only (port 3000, Playwright deps) |
-| **Repo state** | `backend/` and `frontend/` exist. **1338 backend tests**, 18 frontend tests. No `admin-frontend/` (MA) |
+| **Repo state** | `backend/` and `frontend/` exist. **1427 backend tests**, 18 frontend tests. No `admin-frontend/` (MA) |
 
-Session spec for S28: `Documents/11-build-plan.md` §9.
+Session spec for S31: `Documents/11-build-plan.md` §10.
+
+## Phase G — what to verify (the gate for S28–S30)
+
+```bash
+cd backend
+npm run typecheck && npm run lint && npm test          # 1427 tests
+```
+
+**`backend/requests/socket.md` now carries a Phase G section** with the whole two-terminal walk.
+Read that rather than this summary if you are actually sitting down to do it.
+
+**The names to read, in order of what they protect:**
+
+| Test | What breaks without it |
+|---|---|
+| `★ seat 0 receives its own secret; seat 1 receives a different payload without it` | **The entire point of the project.** One state, N payloads — if this ever passes by both being empty, check the next row too |
+| `★ two viewers of one state receive different payloads` | An engine that hides everything from everybody passes every leak test and is unplayable |
+| `★ the leak suite: no seat, and no spectator, sees another seat's secret` | The generic harness M1–M6 reuse unchanged. A per-game leak test written five times is written well once and badly four times |
+| `★ rngSeed appears in no payload before finishedAt` | The deal becomes predictable from a broadcast, and the commitment proves nothing |
+| `★ seedCommit is sha256(rngSeed + gameId), recomputed here by hand` | The provable shuffle stops being provable |
+| `★ a server restart loses nothing` | The reason there is no `Map<gameId, state>` anywhere. A deploy mid-hand costs a reconnect, not a game |
+| `★ rebuilding from a snapshot agrees with rebuilding from event 0` | A snapshot quietly changes the game — which is what a shared, position-dependent RNG would have caused |
+| `★ the same clientMoveId twice → one event` | A socket retry plays a second card |
+| `★ the rejected key is in the payload, never in the clientMoveId column` | A player whose move was refused can never retry a corrected one under the same key |
+| `★ a payload that names a seat is REJECTED, not merely ignored` | The seat-impersonation class re-opens at the one event that matters |
+| `★ advance() terminates` | A request hangs instead of failing |
+| `★ replayFixture is byte-identical across two runs` | `(seed, moves[])` stops reproducing a hand, and every bug report stays a story |
+| `★ removes old snapshots and zero events` | The log is the match. Pruning it deletes the history that pays people |
+
+```bash
+# S28 — the log, the ordering, and the commitment.
+npx vitest run tests/integration/event-log.test.ts --reporter=verbose
+#   The `prisma:error  Unique constraint failed on … (gameId, seq)` lines in
+#   that output are the retry loop working, not a fault — same as S20's.
+
+# S29 — rebuild, snapshots, resync, and the restart.
+npx vitest run tests/integration/game-rebuild.test.ts --reporter=verbose
+
+# S30 — the pipeline over a real socket, with two real clients.
+npx vitest run tests/integration/socket/game.test.ts --reporter=verbose
+
+# The engine, and the five invariants by name. This file is the template every
+# real engine's suite is copied from at M1.
+npx vitest run tests/unit/games/fixture-engine.test.ts --reporter=verbose
+
+# And the guard that changed shape this phase:
+npx vitest run tests/unit/socket/projection-boundary.test.ts --reporter=verbose
+```
+
+### Live — two terminals, and the thing they must disagree about
+
+```bash
+PORT=3999 npm run dev
+# set up a host, a 2-seat fixture table, an invite and a guest —
+# see requests/socket.md, the Phase G section, which has the exact curls
+npx tsx scripts/dev-socket.ts --url http://localhost:3999 --cookies /tmp/c.txt --join $TID --seat 0
+npx tsx scripts/dev-socket.ts --url http://localhost:3999 --cookies /tmp/g.txt --join $TID --seat 1
+```
+
+Terminal 1: `start` → both print `game:started` with a 64-hex `seedCommit`, **then** `game:state`.
+
+**★★ The one thing to look hardest at:** put the two `game:state` payloads side by side.
+`view.secret` is a 7-digit number in each, and they are **different**; neither payload contains the
+other's number anywhere. `legalMoves` is populated for seat 0 and `null` for seat 1. Everything else
+is identical. That difference is one server-side state through `projectState` twice — the whole
+anti-cheat architecture, visible.
+
+Then `press` in terminal 1 (both see `game:event` + a fresh `game:state`), `press` again (→
+`NOT_YOUR_TURN` plus a `game:moveRejected` on that socket alone), and:
+
+```
+raw game:move {"gameId":"<GID>","move":{"kind":"press"},"clientMoveId":"x","seat":0}
+→ ✗ VALIDATION_FAILED { seat: ['errors.field.unknownKey'] }
+```
+
+**Then kill the server mid-game and restart it** — `PORT=3999 npm run dev`. Re-`join`, then `sync 0`
+(→ `delta`, the missed events then one state) and `sync` with no argument (→ `full`). The presses
+from before the restart are still in `counts`. That is the property; nothing was in memory to lose.
+
+Finish the game and watch `dev-socket` print `✓ deal verified`, then confirm it yourself:
+
+```bash
+npx tsx scripts/dev-verify-commit.ts --latest
+```
+
+`npm run db:studio` → `GameEvent` has contiguous `seq`, one `MOVE` per press, an `AUDIT` row per
+rejection whose **`clientMoveId` column is null** (the key is in the payload), and `GameSnapshot` has
+a row every 25 events plus one at `FINISHED`.
 
 ## ⚠ `backend/node_modules` is now **WSL**-owned (flipped 2026-09-09 by S23)
 
@@ -511,7 +599,7 @@ The blocker is native binaries, which no amount of code can fix:
 So, as the tree stands: **`cd backend && npm test` runs from WSL**, and **`cd frontend && npm test`
 runs from Windows**. To move either one, re-run `npm install` from the other OS — it swaps
 esbuild/rollup and costs nothing else, because the Prisma client is dual-target either way. Moving
-`backend/` back to Windows is the likelier need, since that is where the 1338 tests are.
+`backend/` back to Windows is the likelier need, since that is where the 1427 tests are.
 
 **`prisma generate` is the trap, and it is now disarmed.** The generated client at
 `node_modules/.prisma/client` carries a *host-specific* query engine, so generating from WSL and
@@ -526,6 +614,38 @@ What *is* fixed: nothing in the repo depends on `node_modules/.bin` shims any mo
 hook (S178), `contracts:sync`/`check`, the test global setup and the seed test all spawn
 `node <resolved cli.js>` — see `tests/bin.ts`. So the failure you get from Windows is now an honest
 "missing Prisma engine for this platform" rather than a misleading `ENOENT` on `npx`.
+
+## Decisions made while building Phase G (2026-09-12)
+
+| Decision | Value | Why |
+|---|---|---|
+| **★ Randomness is keyed by the log, not by one generator per game** | `gameRng(rngSeed, seq)` — a fresh `Rng` per input event, seeded `{rngSeed}:{seq}` | A single `Rng` shared across a hand is correct only while every rebuild replays from event 0. A snapshot records the *state* but not the generator's stream position, so rebuilding from `seq 25` and replaying onward would deal different cards than the live game did — a bug invisible until the first game long enough to snapshot. Keying by the event's own `seq` makes a transition reproducible from `(rngSeed, seq)` alone, with or without a snapshot in front of it. `tests/integration/game-rebuild.test.ts` proves the two agree by deleting every snapshot and rebuilding the long way |
+| **★ …and deliberately *not* by `clientMoveId`** | the obvious alternative, refused | `clientMoveId` is chosen by the client, and it would have been *easier* — no seq prediction, no concurrency question. It is also a cheat: a player who does not like the card they are about to draw retries the same move under a different id until the deck obliges (07 §4). `seq` is ours. There is a paragraph in `rng.ts` saying so, because this is exactly the shortcut a future session would take |
+| **The move's `seq` is predicted before the engine runs, then verified after the append** | mismatch ⇒ roll back with `CONCURRENT_APPEND` | The generator needs the seq; the seq is assigned by `append`. Predicting `lastSeq + 1` inside the transaction is correct on SQLite (one writer) and vanishingly unlikely to race in a turn-based game anywhere. When it does, the state the move was computed from is stale — so the honest answer is to roll the whole transaction back and let the client retry under the same `clientMoveId`, not to commit a move derived from a state that no longer existed |
+| **★ `GameInstance.id` is chosen by the caller** | `NewGameInstance.id?`, honoured by both repositories | The commitment is `sha256(rngSeed + id)` and is published *before* the deal, so the id has to exist before the row does. A create-then-update would leave a window in which the committed value on disk was wrong — which is precisely the window the commitment exists to close. The only entity in the schema with this property, and the docblock says why |
+| **`SEQ_RETRIES` raised 5 → 12** | `infrastructure/prisma/repositories/games.ts` | The worst case for N simultaneous appenders is N−1 retries for whichever loses every race, and N is bounded by the seat count plus the server's own timeout/phase writes. A budget below the largest table was a limit that would only ever bite under exactly the load it exists for |
+| **★ Replay inputs are events carrying a `move`, not events of `kind: 'MOVE'`** | `isInputEvent` | `PHASE`, `DEAL` and the narration are *derived* — replaying them applies a transition twice — and `AUDIT` rows record moves that never happened. Testing the payload rather than the kind is what makes S32's timeout-applied default actions (logged as `TIMEOUT`) replay correctly without a second edit to this function |
+| **★ A rejected move's `clientMoveId` goes in the payload, never in the column** | `AUDIT` rows have `clientMoveId: null` | The column is unique per game and is how a retry is recognised. A rejected move holding that slot would make the player's *corrected* retry come back "already applied" — and they would be stuck with no way to play. There is a test that plays a corrected move under the same key |
+| **The AUDIT row is written in its own transaction, after the rollback** | `applyMove` catches, then `auditRejection` | The rejection must survive precisely because the move did not. Writing it inside the transaction that is about to roll back would erase it. It also swallows its own failure: an audit problem must not turn a refused move into a 500 |
+| **A rejected move still consumes a `seq`** | the press after a rejection is event 2 | 03 §4.2 puts rejections "in the same ordered stream", and that is worth the seq: "what did this player try, and when" reads off one log in one order. It cost a sequence number; it did not cost a turn |
+| **The illegal-move throttle promotes severity rather than refusing** | 5 in 30 s per seat → `ALERT` (04 §8) | Exceeding it blocks nothing — the engine already refused the move. What changes is whether the audit row is a line nobody reads or a line that pages somebody. The rate limiter is used as a *counter* here, which is a legitimate second use of it and is commented as such |
+| **★ `game:started` and `table:statusChanged` are emitted by the service, not the handler** | a deliberate exception to the Phase F rule | Phase F established that seat announcements come from the handler, because that layer knows which socket to exclude and which system message to write. A game start has no per-socket context and *will* happen with no socket at all (matchmaking auto-start, S43) — and two announcement paths are how one of them ends up silent |
+| **★ The projection guard now permits `spectatorRoom` for `game:state`** | `tests/unit/socket/projection-boundary.test.ts` | It forbade it when written, and 04 §3.2 settles it the other way: `game:state` goes to `seat:*` **and** `spectators:*`. That is correct rather than a concession — the spectator projection is built from `SPECTATOR`, which by definition holds no seat's hidden information, so one payload to many spectators leaks nothing while one to `table:{id}` would reach the *players*. The syntactic guard narrowed to `tableRoom`; the semantic guarantee moved to `tests/helpers/leak.ts`, which asserts it per seat, per game — a property a regex could never check |
+| **…and the canary was replaced, not deleted** | `★ the only thing that projects state is GameSessionService.broadcastState` | Phase F's canary said "nothing emits game state at all yet" and told the next session to delete it here. What replaces it is stronger: game state has exactly **one** emitter, so "where can a hand go?" stays a one-file question |
+| **`application/services/GameSessionService.ts` is the one non-socket file allowed to name a seat room** | the `PROJECTION_PATH` exception in the guard | It *is* the mechanism the room exists for. Adding a second entry to that list should feel expensive; that is the point |
+| **`phase` and `toAct` are read structurally off the state** | `readPhase` / `readToAct` in `GameSessionService` | Both are public in every game this platform will hold — whose turn it is and which street you are on are things everyone at the table can see — so surfacing them on the envelope saves every client from digging them out of a per-game `view`. An engine that names neither reports `null`, which is what an untimed solo puzzle should say |
+| **`legalMoves` is sent only to the seat that is to act** | `null` for everyone else | Harmless in `fixture` and a hand leak in Poker, where "can you raise?" answers "how much is in front of you?". Being consistent costs nothing and removes a judgement call per game |
+| **`describeMove` failures are swallowed** | `describeSafely` | Narration runs *after* the transaction committed, against a state the engine has already moved past. An engine that threw there would turn a played card into a 500 after it was written to the log |
+| **`advance()` is bounded at 1 000 steps** | throws `ILLEGAL_MOVE` rather than looping | An engine whose `advance` never settles is a bug, and the difference between failing that request and hanging the process is the difference between a stack trace and an outage |
+| **`_fixture` has a real `advance()`, not a stub** | winning sets `pendingWinner`; the next `advance` finishes the game | Same shape a real game uses to resolve a trick or deal the next street. Without it the service's advance loop would be written and never exercised, and M1 would be the first time anyone found out |
+| **`_fixture` deals a distinct secret per seat, drawn until unique** | 7-digit numbers | The leak assertions are substring searches. Two seats sharing a secret would make them pass by coincidence, which is the worst possible way for a leak test to pass |
+| **The leak harness is generic from day one** | `tests/helpers/leak.ts` | Adding Sudoku, Blackjack, Shelem, Poker and Chess should each cost one call to `runLeakSuite` and no new assertion logic. It also carries the *other* half of the pincer — `assertProjectionsDiffer` — because an engine that hid everything from everybody would pass every leak assertion and be unplayable |
+| **`replayFixture` keys its rng exactly as the server does** | shares `gameRng` | A replay kit that diverges from production is worse than none: you end up debugging the replayer. One function, two callers, one grep apart |
+| **Snapshot policy tests the *crossing* of a multiple of 25, not landing on one** | `shouldSnapshot(from, to, …)` | A transition appending two events must not be able to step over the boundary and skip the snapshot, which would silently double the replay cost of every rebuild after it |
+| **Pruning keeps the two newest snapshots using two `findLatest` calls** | no new repository method | `findLatest(gameId, atOrBeforeSeq)` already answers "the newest at or before X", so walking back twice gives the cutoff. Adding a `listByGame` to the snapshot repository for a weekly job would be a method the contract suite has to carry forever |
+| **`seatingNameOf` gives bots and vanished accounts key-shaped placeholders** | `bot.medium`, `player.unknown` | `GameInstance.seating` is *history* — a match summary must still read correctly after the player renamed themselves or left. `null` there would make a finished match unattributable, and English prose would make it untranslatable |
+| **The 100-append concurrency test runs ten-wide, not 100-wide** | ten waves of ten | Prisma's SQLite datasource holds **one** connection, so a hundred interactive transactions queue behind it and the later ones blow the 5-second acquisition timeout: the test would fail on pool starvation while saying nothing about ordering. Ten-wide is already far past the real ceiling — a table seats at most ten and moves are turn-based — and the assertion is still `[1..100]` exactly |
+| **Six Phase G counters added** | incl. `game_states_projected` | That one is *supposed* to be a multiple of `moves_applied`. A value equal to it would mean one payload per move — which is the broadcast-the-state bug this whole architecture exists to make impossible |
 
 ## Decisions made while building Phase F (2026-09-09)
 
@@ -722,6 +842,51 @@ hook (S178), `contracts:sync`/`check`, the test global setup and the seed test a
 
 ## Notes for next session
 
+### Phase G left these for S31–S34 to build on
+
+- **★ `container.games` is the only thing that may move a game.** `applyMove` is the pipeline;
+  `createInstance` deals; `rebuildState` is how anything reads state. S32's timeout-applied default
+  action must go **through `applyMove`**, not around it — that is what gets it the idempotency key,
+  the AUDIT trail, the snapshot policy and the per-viewer broadcast for free. Give it a
+  server-generated `clientMoveId` (`timeout:{gameId}:{seq}` is the obvious shape) so the retry rule
+  still applies, and log it as `kind: 'TIMEOUT'` with a `move` in the payload — `isInputEvent`
+  already replays it correctly because it tests for the payload, not the kind.
+- **`meta.defaultActionOnTimeout(state, seat)` is implemented on `fixture` and returns `{ kind:
+  'pass' }`** — and `null` when it is not that seat's turn. S32 applies it on a non-final strike;
+  the ladder, the warning and the ejection are S32/S33's, the safest-move decision is already made.
+- **`meta.turnTimeoutMs` is 30 s on `fixture` and `disconnectGraceMs` is 15 s.** Both are
+  deliberately short so S31–S33 can wait on real deadlines. `turnTimeoutByPhaseMs` exists on the
+  interface and no game uses it yet.
+- **Timers come from `application/ports/clock.ts`, still.** `GameSessionService` already takes the
+  same `Clock`; `TurnTimerService` should share it. Do not reach for `setTimeout`, and do not reach
+  for Vitest's fake timers — they replace the global for Prisma, ioredis and Socket.IO too, and the
+  failures read as race conditions.
+- **`game:turnTimer`, `game:ejectionWarning`, `game:playerEjected`, `game:playerReturned` and
+  `game:reclaimSeat` are declared in 04 §3 and do not exist yet.** Adding an event is still four
+  edits in this order: the payload schema and the two typed maps in `contracts/events.ts`,
+  `npm run contracts:sync`, a handler in `interface/socket/handlers/game.handlers.ts`, and a test.
+- **The deadline has to survive a restart (04 §5.4).** The mechanism is already half-built: a
+  `PHASE` game event is durable and `rebuildState` replays it. Store the absolute `endsAt` as an
+  event (and, when Redis is configured, mirror it at `game:{id}:timer`) — never as a duration, and
+  never *only* in Redis, which may not exist.
+- **`GameEngine.result()` reports `outcome: 'COMPLETED'` for every seat**, on purpose. Ejection is
+  not the engine's business — S33 overwrites the per-seat outcome from `TableMember.ejectionReason`
+  before settlement, which is why `MatchParticipant.outcome` is a column rather than something
+  derived from the standings.
+- **`MatchResult` is still never written.** `applyMove` finishes the instance, reveals the seed and
+  broadcasts `game:finished` from `engine.result(state)` — but nothing persists a `MatchResult` or a
+  `MatchParticipant` row yet. That is **S36**, and it is where the reward settlement transaction
+  hangs. The finish path is the seam it plugs into.
+- **`pruneSnapshots(gameId)` exists and nothing schedules it.** S38's nightly job is where it
+  belongs, beside the ledger reconciliation.
+- **`tests/helpers/game.ts` is the setup every Phase G+ test wants** — `seatTable`, `dealGame`,
+  `pressTurns`. `tests/helpers/leak.ts` and `tests/helpers/replay.ts` are the two kits M1 reuses
+  unchanged; growing a real engine's suite should start by copying
+  `tests/unit/games/fixture-engine.test.ts`, whose five `describe` headings are the five invariants.
+- **`scripts/dev-verify-commit.ts` is new** (`--game` / `--table` / `--latest`) and `dev-socket.ts`
+  grew `start`, `press`, `pass`, `move <json>`, `sync [lastSeq]` and `seq`. It verifies the deal
+  itself on `game:finished`, which is the same four lines the browser will run at S44.
+
 ### Phase F left these for S28–S30 to build on
 
 - **★ Broadcast through `container.realtime`, never through `io` directly.** The four room builders
@@ -729,8 +894,9 @@ hook (S178), `contracts:sync`/`check`, the test global setup and the seed test a
   `broadcastState` loops over seated members and publishes to `seatRoom(tableId, seat)` **once per
   viewer** — there is deliberately no `publishToTable('game:state', …)` to reach for, and
   `tests/unit/socket/projection-boundary.test.ts` will fail the build if one appears.
-  The canary in that file (`nothing emits game state at all yet`) is *expected* to fail at S30:
-  delete it then, and consider converting the scan to the ESLint rule 04 §4.1 names.
+  **Done at S30** — the canary was replaced by `★ the only thing that projects state is
+  GameSessionService.broadcastState`, which pins the emitter list to exactly one file. Converting
+  the scan to the ESLint rule 04 §4.1 names is still open and is still free.
 - **`PresenceService.onGraceExpired(handler)` is the hook S33 wants.** It fires exactly once per
   absence, carries `{ tableId, memberId, seat, identity, gameSlug, disconnectedAt }`, and swallows a
   throwing handler so one bad hook cannot stop the others from inside a timer callback. The
@@ -905,3 +1071,9 @@ Five things about the collection worth remembering:
 - **Phase F added no REST routes**, so the collection is unchanged — and was re-run against Phase F
   to prove nothing broke: **71 requests, 99 assertions, 0 failures**. The socket surface is verified
   by `backend/requests/socket.md` and by 60 socket tests instead.
+- **Phase G added no REST routes either**, for the same reason: a move is socket traffic by the
+  transport rule, and `02` §5 lists no REST game routes. Re-run against Phase G, again **71
+  requests, 99 assertions, 0 failures**. The next session that *will* touch the collection is
+  **S37** (`GET /wallet`, `/wallet/transactions`) — and it should delete `GET /_probe/wallet` and
+  the `/_probe/tables/:id/seats*` routes in the same commit, saying out loud what coverage goes with
+  them (see folder 07's note above).

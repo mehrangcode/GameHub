@@ -92,10 +92,25 @@ describe('★ no private projection may be addressed to a public room', () => {
    * The forbidden shape, in the two forms it can take:
    * `publish(tableRoom(x), 'game:state', …)` and
    * `io.to(tableRoom(x)).emit('game:state', …)`.
+   *
+   * ### Why `spectatorRoom` is not on this list (changed at S30)
+   *
+   * It was, when this file was written and there was nothing to send. 04 §3.2
+   * settles it the other way: `game:state` is addressed to `seat:*` **and**
+   * `spectators:*`, and that is correct rather than a concession. The spectator
+   * projection is built from the `SPECTATOR` viewer, which by definition holds
+   * no seat's hidden information — so one payload to many spectators leaks
+   * nothing, while one payload to `table:{id}` would reach the *players* too
+   * and hand every seat every other seat's hand.
+   *
+   * The syntactic guard is therefore narrowed to the room that genuinely
+   * cannot receive a projection, and the semantic guarantee is covered by
+   * something stronger: `tests/helpers/leak.ts` serializes the spectator
+   * projection and asserts no seat's secret appears anywhere in it, for every
+   * seat, for every game — which is a property a regex could never check.
    */
   const LEAKY = [
     /tableRoom\([^)]*\)\s*,\s*'game:state'/,
-    /spectatorRoom\([^)]*\)\s*,\s*'game:state'/,
     /to\(\s*tableRoom\([^)]*\)\s*\)[\s\S]{0,40}?emit\(\s*'game:state'/,
   ]
 
@@ -108,22 +123,33 @@ describe('★ no private projection may be addressed to a public room', () => {
     }
   })
 
-  it('and nothing emits game state at all yet, which is why the guard is cheap now', () => {
-    // A canary, not a rule. When S30 makes this fail, the guard above stops
-    // being theoretical and this line should be deleted along with the sentence
-    // in the docblock about converting it to a lint rule.
+  it('★ the only thing that projects state is GameSessionService.broadcastState', () => {
+    // The canary this replaces ("nothing emits game state at all yet") did its
+    // job and was deleted at S30, exactly as its comment said it should be.
+    // What takes its place is stronger: game state has exactly one emitter, so
+    // "where can a hand go?" stays a one-file question rather than a grep.
     const emitters = sources
       // `keys.ts` names the string in its forbidden-Redis-key vocabulary, which
-      // is the opposite of emitting it.
+      // is the opposite of emitting it; `events.ts` and the port *declare* the
+      // event rather than sending it.
       .filter((file) => file.path !== 'infrastructure/redis/keys.ts')
+      .filter((file) => file.path !== 'contracts/events.ts')
       .filter(({ text }) => /emit\(\s*'game:state'|,\s*'game:state'/.test(text))
+      .map((file) => file.path)
 
-    expect(emitters.map((file) => file.path)).toEqual([])
+    expect(emitters).toEqual(['application/services/GameSessionService.ts'])
   })
 })
 
 describe('the seat room is reachable from the projection path only', () => {
-  it('nothing outside the socket layer and the port names a seat room', () => {
+  /**
+   * The projection path itself — the one place outside the socket layer that
+   * may name a seat room, because it *is* the mechanism the room exists for.
+   * Adding a second entry here should feel expensive; that is the point.
+   */
+  const PROJECTION_PATH = 'application/services/GameSessionService.ts'
+
+  it('nothing outside the socket layer and the projection path names a seat room', () => {
     // Keeps the private channel from acquiring a second caller by accident. A
     // service that wants to reach a seat should be publishing through the port,
     // where the addressing decision is reviewable.
@@ -131,7 +157,10 @@ describe('the seat room is reachable from the projection path only', () => {
       .filter(({ text }) => /\bseatRoom\(/.test(text))
       .map((file) => file.path)
       .filter(
-        (path) => !path.startsWith('interface/socket/') && path !== 'application/ports/realtime.ts',
+        (path) =>
+          !path.startsWith('interface/socket/') &&
+          path !== 'application/ports/realtime.ts' &&
+          path !== PROJECTION_PATH,
       )
 
     expect(callers).toEqual([])

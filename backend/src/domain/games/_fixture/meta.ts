@@ -59,8 +59,24 @@ export const fixtureMeta: GameMeta = {
   disconnectGraceMs: 15_000,
   reclaimAt: 'IMMEDIATE',
 
-  /** The engine's safest move — press the button. Returned properly from S30. */
-  defaultActionOnTimeout: () => null,
+  /**
+   * ★ The safest move on a timeout strike (04 §6.5): **pass**, never press.
+   *
+   * A default action must never spend a resource the player did not authorise,
+   * and a press is the only thing in this game that can win or lose the match.
+   * So the strike costs the turn and nothing else — which is precisely the
+   * distinction S32 exists to preserve between *a strike* and *an ejection*.
+   *
+   * The state arrives as `unknown` because `GameMeta` is non-generic (it holds
+   * six differently-stated engines); it is narrowed structurally rather than
+   * cast, so a state shape that changes under it returns `null` instead of
+   * producing a move the engine would then reject.
+   */
+  defaultActionOnTimeout: (state: unknown, seat: number) => {
+    const typed = state as { phase?: unknown; toAct?: unknown }
+    if (typed.phase !== 'PLAYING' || typed.toAct !== seat) return null
+    return { kind: 'pass' }
+  },
 
   supportsSpectators: true,
   supportsBots: true,

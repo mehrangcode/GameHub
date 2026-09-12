@@ -7,6 +7,7 @@ import { holderKey } from '../../domain/value-objects/identity.js'
 import { createRedisSocketAdapter } from '../../infrastructure/redis/socketAdapter.js'
 import { identityRefOf } from '../http/middleware/authorize.js'
 import { registerChatHandlers } from './handlers/chat.handlers.js'
+import { registerGameHandlers } from './handlers/game.handlers.js'
 import { registerPresenceHandlers } from './handlers/presence.handlers.js'
 import { registerTableHandlers } from './handlers/table.handlers.js'
 import { resolveHandshake, HandshakeError, type HandshakeRequest } from './identity.js'
@@ -210,6 +211,7 @@ async function onConnection(container: Container, socket: GatewaySocket): Promis
   registerTableHandlers({ context, ack })
   registerPresenceHandlers({ context, ack })
   registerChatHandlers({ context, ack })
+  registerGameHandlers({ context, ack })
 
   socket.on('disconnect', (reason) => {
     container.metrics.adjust('active_sockets', -1)

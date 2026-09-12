@@ -4,14 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository State
 
-**M0 Phases A–E (S01–S22) are built.** `backend/` and `frontend/` exist, with **829 backend tests**
+**M0 Phases A–G (S01–S30) are built.** `backend/` and `frontend/` exist, with **1427 backend tests**
 green: TS-strict scaffolds and the three architecture lint guards, the Zod-validated environment, the
 `contracts/` mirror + drift guard, the full Prisma schema and idempotent seed, the repository set
 behind one contract suite run against both fakes and SQLite, cookie auth with refresh rotation and
 table-bound guest tokens, the game catalog, table/invite/seat lifecycle, the wallet ledger with
-derived idempotency and caps, and the guest→user claim transaction. No `admin-frontend/` yet (that is
-milestone MA). The next session is **S23** — the Socket.IO gateway. See
-`.claude/context/build/context.md`, which is the live cursor and is read first, every session.
+derived idempotency and caps, the guest→user claim transaction, the Socket.IO gateway with the room
+model / presence / chat / optional Redis, and — as of Phase G — the append-only event log: the
+`_fixture` engine, seed commitment, `GameSessionService`'s move pipeline, snapshots and resync, and
+per-viewer projection. No `admin-frontend/` yet (that is milestone MA). The next session is **S31** —
+`TurnTimerService`. See `.claude/context/build/context.md`, which is the live cursor and is read
+first, every session.
 
 `Documents/` holds the complete, cross-referenced PRD set for the platform **plus its admin
 console**; `Documents/08-roadmap.md` and `Documents/11-build-plan.md` drive the work.

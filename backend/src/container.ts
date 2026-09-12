@@ -6,6 +6,7 @@ import { MutableRealtimePublisher } from './application/ports/realtime.js'
 import { AuthService } from './application/services/AuthService.js'
 import { ChatService } from './application/services/ChatService.js'
 import { GameCatalogService } from './application/services/GameCatalogService.js'
+import { GameSessionService } from './application/services/GameSessionService.js'
 import { GuestClaimService } from './application/services/GuestClaimService.js'
 import { GuestSessionService } from './application/services/GuestSessionService.js'
 import { InviteService } from './application/services/InviteService.js'
@@ -94,6 +95,13 @@ export interface Container {
   readonly presence: PresenceService
   /** S26 — chat, emotes, and the i18n-keyed SYSTEM narration. */
   readonly chat: ChatService
+
+  /**
+   * S28–S30 — the event log. Every move in the platform goes through
+   * `applyMove`, and every projection through `broadcastState`: state is never
+   * held in a process map, so an API restart loses zero games.
+   */
+  readonly games: GameSessionService
 
   /**
    * S27 — present only when `REDIS_URL` is set. `null` is the ordinary
@@ -218,6 +226,21 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
 
   const chat = new ChatService({ repos, tables, realtime, rateLimiter, metrics, logger })
 
+  const games = new GameSessionService({
+    uow,
+    repos,
+    registry,
+    catalog,
+    tables,
+    chat,
+    realtime,
+    security,
+    metrics,
+    logger,
+    rateLimiter,
+    clock: overrides.clock ?? systemClock,
+  })
+
   const invites = new InviteService({
     repos,
     registry,
@@ -248,6 +271,7 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
     realtime,
     presence,
     chat,
+    games,
     redis,
     presenceMirror,
     checkReadiness: async () => ({

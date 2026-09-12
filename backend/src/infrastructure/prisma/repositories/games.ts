@@ -105,8 +105,16 @@ export class PrismaGameInstanceRepository
   }
 }
 
-/** How many times `append` retries a lost `(gameId, seq)` race before giving up. */
-const SEQ_RETRIES = 5
+/**
+ * How many times `append` retries a lost `(gameId, seq)` race before giving up.
+ *
+ * Raised from 5 at S28. The worst case for N simultaneous appenders is N−1
+ * retries for whichever one loses every race, and the ceiling on N is a table's
+ * seat count plus the server's own timeout and phase writes — so a budget below
+ * the largest table was a limit that would only ever bite under exactly the load
+ * it exists for. 12 is comfortably above any table this platform can seat.
+ */
+const SEQ_RETRIES = 12
 
 export class PrismaGameEventRepository
   extends PrismaRepositoryBase
