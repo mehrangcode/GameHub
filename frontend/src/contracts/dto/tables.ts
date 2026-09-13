@@ -10,6 +10,7 @@ import {
   TableStatusSchema,
 } from '../enums.js'
 import { PresenceStateSchema } from './presence.js'
+import { TurnEnforcementSchema } from './turnEnforcement.js'
 
 /**
  * Table wire shapes — 02 §5 `/tables`, 03 §3.2.
@@ -35,6 +36,12 @@ export const CreateTableRequestSchema = z
     allowSpectators: z.boolean().optional(),
     /** Defence for a leaked link: the host approves each join. */
     requireApproval: z.boolean().optional(),
+    /**
+     * Turn-enforcement policy (04 §6.3). Omitted ⇒ the defaults, including
+     * `ejectAfterStrikes: 2`. Every field is individually optional, so a host
+     * who only wants the strict rule sends `{ "ejectAfterStrikes": 1 }`.
+     */
+    turnEnforcement: TurnEnforcementSchema.partial().optional(),
   })
   .strict()
 
@@ -54,6 +61,8 @@ export const PatchTableRequestSchema = z
     options: z.record(z.unknown()).optional(),
     allowSpectators: z.boolean().optional(),
     requireApproval: z.boolean().optional(),
+    /** Merged over the table's current setting, not over the defaults. */
+    turnEnforcement: TurnEnforcementSchema.partial().optional(),
   })
   .strict()
   .refine((patch) => Object.keys(patch).length > 0, 'errors.emptyPatch')
@@ -166,6 +175,13 @@ export const TableDetailSchema = TableSummarySchema.extend({
   options: z.record(z.unknown()),
   allowSpectators: z.boolean(),
   requireApproval: z.boolean(),
+  /**
+   * Resolved policy — defaults filled in, exactly like `options`. Public to
+   * everyone at the table on purpose: "you have two lapses before you lose the
+   * seat" is a rule you are about to be held to, and a rule nobody can read is
+   * a trap.
+   */
+  turnEnforcement: TurnEnforcementSchema,
   /** Exactly `seatCount` entries, index-aligned to `seat`. */
   seats: z.array(SeatViewSchema),
   spectatorCount: z.number().int(),

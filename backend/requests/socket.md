@@ -468,3 +468,128 @@ key lives in the _payload_ instead, because `(gameId, clientMoveId)` is the
 unique constraint that recognises a retry — a rejected move holding that slot
 would make the player's corrected retry come back "already applied", and they
 would be stuck with no way to play.
+
+---
+
+## Phase H — the turn clock, the strikes, and the bot (S31–S34)
+
+Everything below is **real time**. `fixture` declares a 30-second turn limit and
+a 10-second warning, so the whole escalation takes about a minute per seat and
+is meant to be watched rather than raced.
+
+Set up as for Phase G — a host, a 2-seat `fixture` table, an invite, a guest —
+then open two terminals:
+
+```bash
+npx tsx scripts/dev-socket.ts --url http://localhost:3999 --cookies /tmp/c.txt --join $TID --seat 0
+npx tsx scripts/dev-socket.ts --url http://localhost:3999 --cookies /tmp/g.txt --join $TID --seat 1
+```
+
+### S31 — the deadline is absolute, and it is written down
+
+`start` in terminal 1. **Both** terminals print `game:turnTimer`, byte-identical:
+
+```
+← game:turnTimer { "seat": 0, "endsAt": "2026-09-12T18:04:31.000Z",
+                   "strikes": 0, "ejectAfterStrikes": 2, "serverTime": … }
+  seat 0 has 30s (strike 0 of 2)
+```
+
+That it reaches **both** is the point: the deadline is public, and the other
+player watching your clock run down is most of what makes a turn limit feel
+fair. The countdown line is computed from `endsAt − serverTime`, never from this
+machine's clock — which is why a laptop whose time is ten minutes out still
+renders the right number.
+
+`press` in terminal 1 → the timer cancels and re-arms for seat 1, a fresh 30 s.
+
+Then confirm the two places it is stored:
+
+```bash
+redis-cli GET "bg:timer:<gameId>"     # → the same ISO instant (skip if REDIS_URL is unset)
+npm run db:studio                     # GameEvent: a PHASE row whose payload is
+                                      # { "turnTimer": { seat, endsAt, strikes } }
+```
+
+**The `PHASE` row is the record and Redis is the mirror**, in that order — which
+is why S34 works on a laptop with no Redis at all. Note the row carries no
+`move`, so `isInputEvent` skips it and a replay applies nothing.
+
+> ★ The log is now roughly **twice as long as the move count**: one move row and
+> one deadline row per turn. That is the cost of a deadline that survives a
+> deploy, and it is why the snapshot boundaries in `game-rebuild.test.ts` moved
+> from 25/50/75 to 50/100/150.
+
+### S32 — the warning is private, and the strike is not
+
+In terminal 1, `idle` — that is, do nothing at all — and watch:
+
+```
+t-10s  ← game:ejectionWarning { "secondsRemaining": 10, "consequence": "EJECTION_NO_REWARD" }
+         ⚠ play within 10s or you are out, with no reward
+t-0    ← game:event { "kind": "TURN_TIMEOUT", "seat": 0, "strikes": 1 }
+       ← game:state  … and the turn has moved to seat 1
+```
+
+**★★ The one thing to look hardest at:** terminal 2 saw the `TURN_TIMEOUT` and
+**not** the warning. A warning broadcast to the table would shame somebody in
+front of the other players *and* tell them exactly when to expect a free trick.
+If it ever appears in terminal 2, 04 §6.2's private channel has been broken.
+
+In Studio, the `TIMEOUT` row carries `move: { kind: "pass" }` — never `press`.
+04 §6.5: a default action may cost you the turn and must never spend a resource
+you did not authorise, and a press is the only move in this game that can win it.
+
+### S33 — two strikes, a bot, and the table plays on
+
+Let seat 0 lapse a second time (press once from terminal 2 in between, so the
+clock comes back round):
+
+```
+← game:playerEjected { "seat": 0, "reason": "TURN_TIMEOUT",
+                       "replacedByBot": true, "reclaimableUntil": "…" }
+← game:rewardPreview { "estimatedCoins": 0, "integrityFactor": 0,
+                       "reasonKey": "games.reward.forfeitedTimeout" }
+  this match will pay you nothing, and why
+```
+
+`game:rewardPreview` prints in terminal **1 only** — the forfeit is yours, not
+the table's business. Then keep pressing in terminal 2 and watch the bot answer
+for seat 0 until somebody wins. **That is the M0 exit criterion, demonstrated.**
+
+Also try the disconnect path, which is the *other* timer: Ctrl-C terminal 2 and
+wait out the 15-second grace. The ejection reason is `ABANDON`, not
+`TURN_TIMEOUT`, and 10 §5.1 pays the two differently — if you ever see one
+reported as the other, they have been conflated.
+
+### S34 — coming back, and a restart that gifts nobody time
+
+Within the 120-second window, in the ejected terminal:
+
+```
+reclaim          → game:playerReturned { outcome: "REPLACED_RETURNED", rewardFactor: 0.5 }
+```
+
+Half reward, which is the whole incentive design: coming back beats staying
+away, and never leaving beats both. Get ejected again and wait past the window:
+
+```
+reclaim          → ✗ SEAT_NOT_RECLAIMABLE { reason: "WINDOW_EXPIRED" }
+```
+
+**★★ Then the restart test, which is the headline of S34.** Note the `endsAt`
+from a live `game:turnTimer`, kill the server, wait ten seconds, and start it
+again:
+
+```bash
+PORT=3999 npm run dev
+# the boot log prints:  turn deadlines resumed  { settled: 0, rearmed: 1 }
+npx tsx scripts/dev-socket.ts --url http://localhost:3999 --cookies /tmp/c.txt --join $TID
+sync
+```
+
+The re-armed deadline is the **same absolute instant** as before the restart —
+not a fresh 30 seconds. A player who was five seconds from timing out is still
+five seconds from timing out, and a deploy is not a way to buy thinking time. A
+deadline that passed *during* the downtime fires immediately, for the same
+reason: the other players already paid for the outage.

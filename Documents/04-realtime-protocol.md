@@ -364,6 +364,14 @@ sequenceDiagram
     end
 ```
 
+> **`TURN_TIMEOUT` is a narration kind, not a stored one** (settled at S31). The log keeps the six
+> `GameEvent.kind` values [03](./03-data-model.md) §4 fixes: a timeout is written as `TIMEOUT` so
+> that replay re-applies the default action it caused, and is *narrated* as `TURN_TIMEOUT` so the
+> client can render "Sara timed out — strike 1 of 2". The same holds for `BOT_TOOK_OVER`,
+> `PLAYER_RETURNED` and `SEAT_ABANDONED` in §5.2, which are stored as `SYSTEM` rows carrying a
+> `system` discriminator. One function — `narrationKindOf` — maps between the two vocabularies, so
+> neither the enum nor the client has to widen.
+
 ### 6.3 Strikes — one deliberate softening of your rule
 
 You specified that failing to play means removal. Implemented as **`ejectAfterStrikes`, default
@@ -388,6 +396,16 @@ turnEnforcement: z.object({
 `strikesResetOnAction: true` matters: a player who times out once, then plays normally for ten
 tricks, should not be ejected by a second lapse twenty minutes later. Strikes measure *current*
 absence, not lifetime record.
+
+> **Where it lives** (settled at S31): its own nullable `Table.turnEnforcementJson` column and its
+> own schema in `contracts/dto/turnEnforcement.ts` — **not** inside `optionsJson`, which each game's
+> own strict `optionsSchema` validates. These four fields are platform policy rather than game
+> rules, so copying them into six engines' schemas would let them drift.
+>
+> `null` is not the same as `{}`: a table that never expressed a preference follows the defaults as
+> they change; one that did keeps what its host chose. Every table response publishes the
+> **resolved** policy, defaults filled in, because a rule you are about to be held to and cannot
+> read is a trap.
 
 ### 6.4 Seat reclamation
 

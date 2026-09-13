@@ -180,6 +180,15 @@ const OBSERVED = [
   'game:moveRejected',
   'game:finished',
   'game:syncRequired',
+  // Phase H. `game:ejectionWarning` and `game:rewardPreview` are listened for
+  // by *every* client on purpose: the assertion that matters is that seat 1
+  // receives neither, and a client that was not listening would pass that test
+  // for the wrong reason.
+  'game:turnTimer',
+  'game:ejectionWarning',
+  'game:playerEjected',
+  'game:playerReturned',
+  'game:rewardPreview',
   'error',
 ] as const
 

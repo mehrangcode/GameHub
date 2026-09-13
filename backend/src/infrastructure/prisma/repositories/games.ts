@@ -71,6 +71,14 @@ export class PrismaGameInstanceRepository
     return row ? toGameInstance(row) : null
   }
 
+  async listActive(): Promise<GameInstance[]> {
+    const rows = await this.db.gameInstance.findMany({
+      where: { status: 'ACTIVE' },
+      orderBy: [{ startedAt: 'asc' }, { id: 'asc' }],
+    })
+    return rows.map(toGameInstance)
+  }
+
   async listByTable(tableId: string): Promise<GameInstance[]> {
     const rows = await this.db.gameInstance.findMany({
       where: { tableId },

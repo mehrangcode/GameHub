@@ -23,6 +23,15 @@ export type NewGameInstance = Draft<
 export interface IGameInstanceRepository extends IRepository<GameInstance> {
   create(data: NewGameInstance): Promise<GameInstance>
   findActiveByTable(tableId: string): Promise<GameInstance | null>
+  /**
+   * Every game still in play, anywhere — the startup re-arm of S34, 04 §5.4.
+   *
+   * Deliberately unbounded and unpaged: it is called once, at boot, and a
+   * platform with enough live games for that to matter has bigger problems than
+   * one query. Ordered oldest-first so the deadline closest to expiry is
+   * re-armed first.
+   */
+  listActive(): Promise<GameInstance[]>
   listByTable(tableId: string): Promise<GameInstance[]>
   finish(id: string, status: GameInstanceStatus, at: Date): Promise<GameInstance>
   /** Publishes the deal seed once the hand is over (05 §3, 07 §4). */

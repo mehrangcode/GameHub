@@ -161,8 +161,16 @@ const stamp = () => dim(new Date().toISOString().slice(11, 23))
 /** The client half of the provable-shuffle check (04 §7). Four lines, on purpose. */
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex')
 
-function event(name: string, payload: unknown): void {
+/**
+ * `note` is a one-line human reading of the payload, printed under it.
+ *
+ * Added at S31 for the turn clock: `endsAt` is an ISO instant, and "seat 0 has
+ * 30s" is what you actually want to see scroll past while you sit there
+ * deliberately not playing.
+ */
+function event(name: string, payload: unknown, note?: string): void {
   console.log(`${stamp()} ${cyan('←')} ${bold(name)} ${format(payload)}`)
+  if (note !== undefined) console.log(`  ${note}`)
 }
 
 function format(value: unknown): string {
@@ -304,6 +312,54 @@ socket.on('game:event', (payload) => {
   event('game:event', payload)
 })
 
+/**
+ * Phase H — the turn clock, printed as a countdown rather than as an instant.
+ *
+ * `endsAt` is absolute on the wire (04 §5.4) precisely so a client with a wrong
+ * system clock still renders correctly: the remaining time below is measured
+ * against the `serverTime` that travelled with it, never against this machine's
+ * `Date.now()`. That is the same arithmetic the browser will do at S44.
+ */
+socket.on('game:turnTimer', (payload) => {
+  const remainingMs = new Date(payload.endsAt).getTime() - payload.serverTime
+  event(
+    'game:turnTimer',
+    payload,
+    dim(
+      `seat ${String(payload.seat)} has ${String(Math.round(remainingMs / 1000))}s ` +
+        `(strike ${String(payload.strikes)} of ${String(payload.ejectAfterStrikes)})`,
+    ),
+  )
+})
+
+socket.on('game:ejectionWarning', (payload) =>
+  event(
+    yellow('game:ejectionWarning'),
+    payload,
+    // ★ If this ever prints in the terminal of a seat that is NOT the one on
+    // the clock, the private channel of 04 §6.2 has been broadcast.
+    yellow(`  ⚠ play within ${String(payload.secondsRemaining)}s or you are out, with no reward`),
+  ),
+)
+
+socket.on('game:playerEjected', (payload) =>
+  event(
+    red('game:playerEjected'),
+    payload,
+    payload.reclaimableUntil === null
+      ? red('  seat is final — no reclaim')
+      : yellow(`  reclaim with 'reclaim' before ${payload.reclaimableUntil}`),
+  ),
+)
+
+socket.on('game:playerReturned', (payload) =>
+  event(green('game:playerReturned'), payload, green('  human control restored — 0.5x reward')),
+)
+
+socket.on('game:rewardPreview', (payload) =>
+  event(red('game:rewardPreview'), payload, red('  this match will pay you nothing, and why')),
+)
+
 socket.on('game:moveRejected', (payload) => event(red('game:moveRejected'), payload))
 socket.on('game:syncRequired', (payload) => event(yellow('game:syncRequired'), payload))
 
@@ -375,6 +431,10 @@ ${bold('the game')} ${dim('(Phase G)')}
   move <json>                  game:move with any body at all
   sync [lastSeq]               game:requestSync     ${dim('(omit for a full resync)')}
   seq                          what this client thinks lastSeq is
+
+${bold('turn enforcement')} ${dim('(Phase H)')}
+  reclaim                      game:reclaimSeat     ${dim('(take your seat back from the bot)')}
+  idle                         ${dim('just wait — the deadline is real, and so is the strike')}
   spam <n>                     n chat messages fast ${dim('(watch RATE_LIMITED)')}
   raw <event> <json>           anything at all      ${dim('(try raw table:takeSeat {"tableId":"x","seat":1,"userId":"someone"})')}
   quit
@@ -506,6 +566,17 @@ repl.on('line', (line) => {
             ...(at === undefined ? {} : { lastSeq: Number(at) }),
           })
         }
+        break
+      }
+      case 'reclaim': {
+        const gameId = requireGame()
+        if (gameId !== null) send('game:reclaimSeat', { gameId })
+        break
+      }
+      case 'idle': {
+        console.log(
+          dim('  doing nothing, on purpose. Watch for game:ejectionWarning, then the strike.'),
+        )
         break
       }
       case 'seq': {

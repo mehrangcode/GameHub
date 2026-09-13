@@ -5,6 +5,7 @@ import type {
   TableDetail,
   TableSummary,
 } from '../../contracts/dto/tables.js'
+import { withTurnEnforcementDefaults } from '../policies/turnEnforcement.js'
 import type { Table, TableMember } from '../../domain/entities/table.js'
 import {
   ForbiddenError,
@@ -107,6 +108,11 @@ export class TableService {
       rewardEligible: true,
       ...(input.allowSpectators === undefined ? {} : { allowSpectators: input.allowSpectators }),
       ...(input.requireApproval === undefined ? {} : { requireApproval: input.requireApproval }),
+      // Written only when the host said something. A null column follows the
+      // platform defaults as they move; a written one keeps what was chosen.
+      ...(input.turnEnforcement === undefined
+        ? {}
+        : { turnEnforcement: withTurnEnforcementDefaults(input.turnEnforcement) }),
     })
 
     this.deps.metrics.increment('tables_created')
@@ -175,6 +181,16 @@ export class TableService {
 
     if (input.allowSpectators !== undefined) patch.allowSpectators = input.allowSpectators
     if (input.requireApproval !== undefined) patch.requireApproval = input.requireApproval
+
+    if (input.turnEnforcement !== undefined) {
+      // Merged over the table's *current* setting rather than over the
+      // defaults: a patch naming `ejectAfterStrikes` alone must not silently
+      // reset a `warningSeconds` the host chose last week.
+      patch.turnEnforcement = withTurnEnforcementDefaults(
+        input.turnEnforcement,
+        withTurnEnforcementDefaults(table.turnEnforcement),
+      )
+    }
 
     const updated = await this.deps.repos.tables.update(tableId, patch)
     return this.view(updated, await this.deps.repos.tables.listMembers(tableId), viewer)

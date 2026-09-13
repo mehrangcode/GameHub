@@ -14,6 +14,8 @@ import {
   ValidationError,
 } from '../../src/domain/errors/errors.js'
 import { RecordingPublisher } from '../fakes/realtime.js'
+import { isTimerEvent } from '../../src/application/ports/turns.js'
+import type { GameEvent } from '../../src/domain/entities/game.js'
 
 /**
  * ★ S28 — the append-only log, the ordering the database enforces, and the
@@ -40,6 +42,19 @@ beforeEach(async () => {
 afterAll(async () => {
   await container.shutdown()
 })
+
+/**
+ * The log minus its turn deadlines.
+ *
+ * Since Phase H every turn also appends the `endsAt` it was given (04 §6.1), so
+ * a game's log is roughly twice as long as its move count. Tests about *moves*
+ * filter those rows out rather than counting around them, which keeps each
+ * assertion about the thing it is named after.
+ */
+async function moveRows(gameId: string): Promise<GameEvent[]> {
+  const rows = await container.repos.events.listByGame(gameId)
+  return rows.filter((row) => !isTimerEvent(row.payload))
+}
 
 describe('creating an instance', () => {
   it('★ seedCommit is sha256(rngSeed + gameId), recomputed here by hand', async () => {
@@ -233,13 +248,15 @@ describe('★ seq ordering', () => {
     const rows = await container.repos.events.listByGame(game.id)
     const seqs = rows.map((row) => row.seq)
 
-    expect(seqs).toHaveLength(100)
-    // Gapless *and* duplicate-free: `[1..100]` exactly, in order.
-    expect(seqs).toEqual(Array.from({ length: 100 }, (_, index) => index + 1))
-    expect(new Set(seqs).size).toBe(100)
+    // ★ Seq 1 is the deal's own turn deadline (Phase H, 04 §6.1), so the
+    // hundred contended appends occupy 2..101. The property under test is
+    // unchanged: gapless, duplicate-free, and in order.
+    expect(seqs).toHaveLength(101)
+    expect(seqs).toEqual(Array.from({ length: 101 }, (_, index) => index + 1))
+    expect(new Set(seqs).size).toBe(101)
 
     const reread = await container.repos.games.findById(game.id)
-    expect(reread?.seq).toBe(100)
+    expect(reread?.seq).toBe(101)
   })
 
   it('the instance seq never lags the newest event', async () => {
@@ -274,7 +291,10 @@ describe('★ move idempotency, enforced by the database', () => {
     expect(second.replayed).toBe(true)
     expect(second.seq).toBe(first.seq)
 
-    const rows = await db.gameEvent.findMany({ where: { gameId: game.game.id } })
+    // Timer rows excluded: the question is how many *moves* the retry produced.
+    const rows = (await db.gameEvent.findMany({ where: { gameId: game.game.id } })).filter(
+      (row) => !isTimerEvent(JSON.parse(row.payloadJson) as Record<string, unknown>),
+    )
     expect(rows).toHaveLength(1)
 
     // ★ And the game did not advance twice: the state is one press in, and it
@@ -326,8 +346,11 @@ describe('★ move idempotency, enforced by the database', () => {
       payload: { move: { kind: 'press' } },
     })
 
-    expect(await container.repos.events.countByGame(game.id)).toBe(1)
-    expect(again.seq).toBe(1)
+    expect(await moveRows(game.id)).toHaveLength(1)
+    // Seq 2, because the deal's deadline took seq 1 — and the *point* stands:
+    // the second append with the same key returned the first row rather than
+    // writing a new one.
+    expect(again.seq).toBe(2)
   })
 })
 
@@ -344,7 +367,7 @@ describe('★ rejected moves land as AUDIT events in the same ordered stream', (
       }),
     ).rejects.toThrow(IllegalMoveError)
 
-    const rows = await container.repos.events.listByGame(game.game.id)
+    const rows = await moveRows(game.game.id)
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ kind: 'AUDIT', seat: 0 })
     expect(rows[0]?.payload).toMatchObject({
@@ -371,7 +394,7 @@ describe('★ rejected moves land as AUDIT events in the same ordered stream', (
       }),
     ).rejects.toThrow(NotYourTurnError)
 
-    const rows = await container.repos.events.listByGame(game.game.id)
+    const rows = await moveRows(game.game.id)
     expect(rows[0]?.payload).toMatchObject({ code: 'NOT_YOUR_TURN' })
   })
 
@@ -401,7 +424,8 @@ describe('★ rejected moves land as AUDIT events in the same ordered stream', (
     })
 
     expect(applied.replayed).toBe(false)
-    expect(await container.repos.events.countByGame(game.game.id)).toBe(2)
+    // The AUDIT row for the refusal, then the MOVE that corrected it.
+    expect(await moveRows(game.game.id)).toHaveLength(2)
   })
 
   it('records a SecurityEvent, escalating to ALERT after five in the window', async () => {

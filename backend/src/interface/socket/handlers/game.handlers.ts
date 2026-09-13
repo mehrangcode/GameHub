@@ -1,8 +1,10 @@
 import {
   GameMovePayloadSchema,
+  GameReclaimSeatPayloadSchema,
   GameRequestSyncPayloadSchema,
   GameStartPayloadSchema,
   type GameMoveResult,
+  type GameReclaimResult,
   type GameStartResult,
   type GameSyncResult,
 } from '../../../contracts/events.js'
@@ -135,7 +137,47 @@ export function registerGameHandlers({ context, ack }: GameHandlerDeps): void {
         ...(lastSeq === undefined ? {} : { lastSeq }),
       })
 
+      /**
+       * ★ The countdown, after the state it belongs to.
+       *
+       * A resync deliberately skips the persisted timer rows when it replays
+       * narration — they would be one "phase changed" line per turn of the
+       * match — so the live deadline has to arrive separately. Sent *after* the
+       * state, because a ring rendered before the board it belongs to is a
+       * flash of a countdown on an empty table.
+       *
+       * The two services are joined here, in the interface layer, rather than
+       * by either one importing the other: `GameSessionService` knowing about
+       * turn timers is the dependency Phase H exists to avoid.
+       */
+      await container.turnTimers.announceToSocket(socket.id, gameId)
+
       return { gameId, ...outcome } satisfies GameSyncResult
+    }),
+  )
+
+  // ── game:reclaimSeat ──────────────────────────────────────────────────────
+  socket.on(
+    'game:reclaimSeat',
+    handler(ack, GameReclaimSeatPayloadSchema, async ({ gameId }) => {
+      const instance = await container.games.requireActive(gameId)
+      atTable(context, instance.tableId)
+      await spendSocketBudget(container, perSocket(socket.id, 'reclaimSeat'), SEAT_CHANGE_RULE)
+
+      /**
+       * The seat comes from the caller's identity inside the service, exactly
+       * as it does for a move. A payload that could name a seat would be a way
+       * to take somebody *else's* seat back from a bot, which is a takeover
+       * wearing a friendlier name.
+       */
+      const outcome = await container.seats.reclaim(gameId, context.ref)
+
+      return {
+        gameId,
+        seat: outcome.seat,
+        applied: outcome.applied,
+        pendingUntilBoundary: outcome.pendingUntilBoundary,
+      } satisfies GameReclaimResult
     }),
   )
 }

@@ -108,4 +108,30 @@ describe('architecture lint guards', () => {
       expect(ruleIds(messages)).not.toContain('no-restricted-imports')
     })
   })
+
+  describe('guard 2b — no engine ever touches a clock (I1, S31)', () => {
+    it('★ rejects an engine importing the turn timer service', async () => {
+      // S31's "no engine file imports the timer service". The ban already
+      // exists — `**/application/**` is in guard 3's pattern list — but it is
+      // generic, and the *reason* this particular import must fail is specific
+      // enough to be worth a named test: an engine that could reach a timer
+      // could read a clock, and invariant I1 (pure and deterministic) would
+      // stop being checkable. Turn limits are declared in `GameMeta` and
+      // enforced in the session layer, in that order and no other.
+      const messages = await lint(
+        'src/domain/games/shelem/_probe.ts',
+        "import { TurnTimerService } from '../../../application/services/TurnTimerService.js'\n" +
+          'export type X = TurnTimerService\n',
+      )
+      expect(ruleIds(messages)).toContain('no-restricted-imports')
+    })
+
+    it('★ and no engine reads the wall clock directly either', async () => {
+      const messages = await lint(
+        'src/domain/games/shelem/_probe.ts',
+        'export const now = Date.now()\n',
+      )
+      expect(ruleIds(messages)).toContain('no-restricted-syntax')
+    })
+  })
 })

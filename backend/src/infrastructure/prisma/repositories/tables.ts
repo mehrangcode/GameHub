@@ -50,8 +50,16 @@ function identityWhere(tableId: string, identity: IdentityRef) {
 
 export class PrismaTableRepository extends PrismaRepositoryBase implements ITableRepository {
   async create(data: NewTable): Promise<Table> {
-    const { options, ...rest } = data
-    return toTable(await this.db.table.create({ data: { ...rest, optionsJson: toJson(options) } }))
+    const { options, turnEnforcement, ...rest } = data
+    return toTable(
+      await this.db.table.create({
+        data: {
+          ...rest,
+          optionsJson: toJson(options),
+          turnEnforcementJson: toJsonOrNull(turnEnforcement),
+        },
+      }),
+    )
   }
 
   async findById(id: string): Promise<Table | null> {
@@ -60,13 +68,19 @@ export class PrismaTableRepository extends PrismaRepositoryBase implements ITabl
   }
 
   async update(id: string, data: Partial<Table>): Promise<Table> {
-    const { options, ...rest } = data
+    const { options, turnEnforcement, ...rest } = data
     return this.mapMissing(
       async () =>
         toTable(
           await this.db.table.update({
             where: { id },
-            data: { ...rest, ...(options === undefined ? {} : { optionsJson: toJson(options) }) },
+            data: {
+              ...rest,
+              ...(options === undefined ? {} : { optionsJson: toJson(options) }),
+              ...(turnEnforcement === undefined
+                ? {}
+                : { turnEnforcementJson: toJsonOrNull(turnEnforcement) }),
+            },
           }),
         ),
       'Table',

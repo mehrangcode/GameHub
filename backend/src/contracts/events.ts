@@ -5,6 +5,7 @@ import type { MemberView, OccupantView, TableDetail } from './dto/tables.js'
 import type { Identity } from './dto/auth.js'
 import {
   BotDifficultySchema,
+  type EjectionReason,
   type GameEventKind,
   type MatchReason,
   type MemberRole,
@@ -188,6 +189,17 @@ export const GameRequestSyncPayloadSchema = z
 
 export type GameRequestSyncPayload = z.infer<typeof GameRequestSyncPayloadSchema>
 
+/**
+ * Take your seat back from the bot that replaced you — S34, 04 §6.4.
+ *
+ * Carries no `seat`, for the same reason `game:move` does not: the seat is
+ * looked up from `TableMember` by the socket's frozen identity, so there is no
+ * field with which to reclaim somebody *else's* seat. That would be a takeover
+ * wearing a friendlier name.
+ */
+export const GameReclaimSeatPayloadSchema = z.object({ gameId }).strict()
+export type GameReclaimSeatPayload = z.infer<typeof GameReclaimSeatPayloadSchema>
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Server → client payloads
 // ═══════════════════════════════════════════════════════════════════════════
@@ -348,10 +360,120 @@ export interface GameNarrationPayload {
   readonly gameId: string
   readonly tableId: string
   readonly seq: number
-  readonly kind: GameEventKind
+  readonly kind: NarrationKind
   readonly seat: number | null
   /** i18n key + params, or `null` for an event with nothing to say out loud. */
   readonly descriptor: { readonly key: string; readonly params: Record<string, unknown> } | null
+  /** Present on `TURN_TIMEOUT` only: the seat's strike count *after* the lapse. */
+  readonly strikes?: number
+}
+
+/**
+ * ★ What the table is **told**, which is wider than what the log **stores**.
+ *
+ * 03 §4 fixes the persisted `GameEvent.kind` vocabulary at six values, and 04
+ * §5.2/§6.2 narrate four more — `TURN_TIMEOUT`, `BOT_TOOK_OVER`,
+ * `PLAYER_RETURNED`, `SEAT_ABANDONED`. Both documents are right, because they
+ * are describing different things: a timeout is stored as a `TIMEOUT` row (so
+ * `isInputEvent` replays the default action it applied) and *narrated* as
+ * `TURN_TIMEOUT` (so the client can render "Sara timed out — strike 1" rather
+ * than a bare phase change).
+ *
+ * The mapping lives in exactly one place, `GameSessionService.narrationKindOf`,
+ * and is derived from the row's payload rather than guessed at by the client.
+ */
+export const NARRATION_ONLY_KINDS = [
+  'TURN_TIMEOUT',
+  'BOT_TOOK_OVER',
+  'PLAYER_RETURNED',
+  'SEAT_ABANDONED',
+] as const
+
+export type NarrationKind = GameEventKind | (typeof NARRATION_ONLY_KINDS)[number]
+
+// ── Phase H: turn enforcement (S31–S34, 04 §6) ───────────────────────────────
+
+/**
+ * ★ The deadline, as an **absolute instant** — 04 §5.4, 06 §6.1.
+ *
+ * Never a duration, and never "30 seconds from when you read this". A client
+ * whose system clock is ten minutes fast must still render the right countdown,
+ * which is why `serverTime` travels with it: the client's ring is driven by
+ * `endsAt − serverTime`, measured against an offset it took at handshake, and
+ * never against `Date.now()` directly.
+ *
+ * Goes to the whole table (`table:{id}`), not just the acting seat: everyone is
+ * waiting on that clock, and the other three watching it tick is most of what
+ * makes a turn limit feel fair rather than arbitrary.
+ */
+export interface GameTurnTimerPayload {
+  readonly gameId: string
+  readonly tableId: string
+  readonly seat: number
+  /** ISO 8601, absolute. */
+  readonly endsAt: string
+  /** Strikes this seat has already accrued — the client renders the pips. */
+  readonly strikes: number
+  /** The limit it is counting towards, so "1 of 2" needs no second lookup. */
+  readonly ejectAfterStrikes: number
+  readonly serverTime: number
+}
+
+/**
+ * ★ To the acting seat's **room alone** — 04 §6.2.
+ *
+ * Deliberately not a table broadcast. This is a private nudge ("play in 10s or
+ * you lose the seat and the coins"), and putting it in front of the other three
+ * turns a personal warning into a public shaming that also tells them exactly
+ * when to expect a free trick.
+ */
+export interface GameEjectionWarningPayload {
+  readonly gameId: string
+  readonly tableId: string
+  readonly seat: number
+  readonly secondsRemaining: number
+  readonly consequence: 'EJECTION_NO_REWARD'
+}
+
+/** The seat is now held by a bot (or abandoned) — 04 §6.2, §6.4. */
+export interface GamePlayerEjectedPayload {
+  readonly gameId: string
+  readonly tableId: string
+  readonly seat: number
+  readonly reason: EjectionReason
+  readonly replacedByBot: boolean
+  /** ISO 8601; null when this seat can never be reclaimed (second ejection, or window 0). */
+  readonly reclaimableUntil: string | null
+  readonly strikes: number
+}
+
+/** The human took the seat back inside the window — S34, `REPLACED_RETURNED`. */
+export interface GamePlayerReturnedPayload {
+  readonly gameId: string
+  readonly tableId: string
+  readonly seat: number
+  readonly outcome: SeatOutcome
+  /** 0.5 for a returned seat, 1 for one that never left — 04 §6.4. */
+  readonly rewardFactor: number
+}
+
+/**
+ * ★ The consequence, **explained** — 04 §6.6.
+ *
+ * Sent to the ejected seat alone the moment it is ejected, because "you will
+ * earn nothing from this match, and here is why" is the one message that must
+ * never be inferred from an empty wallet after the fact. `estimatedCoins` is 0
+ * and `integrityFactor` is 0 until S35 computes a real reward; the *shape* is
+ * final now so the post-match screen has something stable to render.
+ */
+export interface GameRewardPreviewPayload {
+  readonly gameId: string
+  readonly tableId: string
+  readonly seat: number
+  readonly estimatedCoins: number
+  readonly integrityFactor: number
+  /** i18n key, never a sentence: `games.reward.forfeitedEjection`. */
+  readonly reasonKey: string
 }
 
 /** To the offender's socket only. The same refusal also lands in the ack. */
@@ -438,6 +560,22 @@ export interface GameMoveResult {
   readonly replayed: boolean
 }
 
+/**
+ * The answer to `game:reclaimSeat` — S34.
+ *
+ * `applied: false` with `pendingUntilBoundary: true` is the Poker/Blackjack
+ * case (`reclaimAt: 'HAND_BOUNDARY'`): the claim is accepted and takes effect
+ * when the hand ends, because walking in on a bot's committed chips is unfair
+ * in both directions. Refusals are errors, not a `false` — an expired window
+ * answers `SEAT_NOT_RECLAIMABLE`.
+ */
+export interface GameReclaimResult {
+  readonly gameId: string
+  readonly seat: number
+  readonly applied: boolean
+  readonly pendingUntilBoundary: boolean
+}
+
 export interface GameSyncResult {
   readonly gameId: string
   readonly mode: 'delta' | 'full'
@@ -478,6 +616,13 @@ export interface ServerToClientEvents {
   'game:finished': (payload: GameFinishedPayload) => void
   'game:syncRequired': (payload: GameSyncRequiredPayload) => void
 
+  /** Phase H. `game:ejectionWarning` and `game:rewardPreview` are seat-private. */
+  'game:turnTimer': (payload: GameTurnTimerPayload) => void
+  'game:ejectionWarning': (payload: GameEjectionWarningPayload) => void
+  'game:playerEjected': (payload: GamePlayerEjectedPayload) => void
+  'game:playerReturned': (payload: GamePlayerReturnedPayload) => void
+  'game:rewardPreview': (payload: GameRewardPreviewPayload) => void
+
   error: (payload: SocketErrorPayload) => void
 }
 
@@ -499,6 +644,7 @@ export interface ClientToServerEvents {
   'game:start': (payload: GameStartPayload, ack: AckFn<GameStartResult>) => void
   'game:move': (payload: GameMovePayload, ack: AckFn<GameMoveResult>) => void
   'game:requestSync': (payload: GameRequestSyncPayload, ack: AckFn<GameSyncResult>) => void
+  'game:reclaimSeat': (payload: GameReclaimSeatPayload, ack: AckFn<GameReclaimResult>) => void
 }
 
 /** Nothing travels between server instances directly — the Redis adapter does it. */

@@ -106,6 +106,27 @@ export const COUNTERS = [
   'game_resyncs_full',
   'game_resyncs_delta',
   'game_snapshots_pruned',
+
+  // Phase H — turn enforcement. Four of these are worth reading together:
+  //
+  //   `turn_warnings_sent` against `turn_timeouts` is how well the warning
+  //   works. A warning that almost never converts into a timeout is doing its
+  //   job; one that always does means players are not seeing it.
+  //
+  //   `ejections` (declared above, since Phase C, and finally incremented
+  //   here) against `seats_reclaimed` is the incentive design of 04 §6.4
+  //   measured directly — half reward for coming back is supposed to make
+  //   reclaiming the common case.
+  //
+  //   `turn_timers_rearmed` is only ever incremented at boot, so a non-zero
+  //   value on a long-running process means something restarted the sweep.
+  'turn_timers_armed',
+  'turn_warnings_sent',
+  'turn_timeouts',
+  'turn_timers_rearmed',
+  'bot_moves_applied',
+  'seats_reclaimed',
+  'seats_abandoned',
 ] as const
 
 /** Point-in-time values that go up and down. */

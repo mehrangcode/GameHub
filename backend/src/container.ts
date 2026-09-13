@@ -3,6 +3,7 @@ import type { Logger } from 'pino'
 import { systemClock, type Clock } from './application/ports/clock.js'
 import type { IRateLimiter } from './application/ports/rateLimiter.js'
 import { MutableRealtimePublisher } from './application/ports/realtime.js'
+import { MutableTurnObserver } from './application/ports/turns.js'
 import { AuthService } from './application/services/AuthService.js'
 import { ChatService } from './application/services/ChatService.js'
 import { GameCatalogService } from './application/services/GameCatalogService.js'
@@ -13,8 +14,10 @@ import { InviteService } from './application/services/InviteService.js'
 import { LoginThrottle } from './application/services/LoginThrottle.js'
 import { MetricsRegistry } from './application/services/MetricsRegistry.js'
 import { PresenceService } from './application/services/PresenceService.js'
+import { SeatEnforcementService } from './application/services/SeatEnforcementService.js'
 import { SecurityEventService } from './application/services/SecurityEventService.js'
 import { TableService } from './application/services/TableService.js'
+import { TurnTimerService } from './application/services/TurnTimerService.js'
 import { WalletService } from './application/services/WalletService.js'
 import type { Env } from './config/env.js'
 import { getEnv } from './config/env.js'
@@ -33,6 +36,7 @@ import { buildRepositories, UnitOfWork } from './infrastructure/prisma/UnitOfWor
 import { SlidingWindowRateLimiter } from './infrastructure/rateLimit/slidingWindow.js'
 import { createRedisConnection, type RedisConnection } from './infrastructure/redis/client.js'
 import { RedisPresenceMirror } from './infrastructure/redis/presenceMirror.js'
+import { RedisTurnTimerMirror } from './infrastructure/redis/turnTimerMirror.js'
 import { RedisRateLimiter } from './infrastructure/redis/RedisRateLimiter.js'
 
 /**
@@ -104,6 +108,24 @@ export interface Container {
   readonly games: GameSessionService
 
   /**
+   * S31 — turn deadlines. Absolute, persisted as a `PHASE` event, mirrored to
+   * Redis when there is one. Owns real timers; `stop()` in shutdown.
+   */
+  readonly turnTimers: TurnTimerService
+  /**
+   * S32–S34 — the consequence of a deadline passing: strikes, the safest
+   * default action, ejection, the bot that takes the seat, and the reclaim.
+   * Observes turns; registered with `PresenceService` for the disconnect path.
+   */
+  readonly seats: SeatEnforcementService
+  /**
+   * S31 — the fan-out told after every state change. Attached to by
+   * `turnTimers` and `seats`; see `application/ports/turns.ts` for why this is
+   * a port rather than a call.
+   */
+  readonly turns: MutableTurnObserver
+
+  /**
    * S27 — present only when `REDIS_URL` is set. `null` is the ordinary
    * single-instance deployment, not a degraded one: the in-memory socket
    * adapter and the in-process limiter are correct for one process, and Redis
@@ -111,6 +133,7 @@ export interface Container {
    */
   readonly redis: RedisConnection | null
   readonly presenceMirror: RedisPresenceMirror | null
+  readonly turnTimerMirror: RedisTurnTimerMirror | null
 
   /** Reports every configured dependency, and only the configured ones. */
   readonly checkReadiness: () => Promise<Record<string, DependencyStatus>>
@@ -160,6 +183,7 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
     (redis === null ? new SlidingWindowRateLimiter() : new RedisRateLimiter(redis, logger))
 
   const presenceMirror = redis === null ? null : new RedisPresenceMirror(redis, logger)
+  const turnTimerMirror = redis === null ? null : new RedisTurnTimerMirror(redis, logger)
   const security = new SecurityEventService(repos.securityEvents, logger, metrics)
 
   const hasher = new Argon2PasswordHasher(env)
@@ -226,6 +250,24 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
 
   const chat = new ChatService({ repos, tables, realtime, rateLimiter, metrics, logger })
 
+  /**
+   * ★ The Phase H wiring, and the order of these six statements is the design.
+   *
+   * `games` announces every state change to `turns`; `turns` fans out to
+   * `seats` and then to `turnTimers`. Nothing points back at `games` except
+   * through `applySystemMove`, which is the one way a timeout or a bot may move
+   * a piece — so the cycle that would otherwise exist (timers need the log, the
+   * log needs the timers) is broken by a port and an attachment order rather
+   * than by a framework.
+   *
+   * `seats` is attached **before** `turnTimers`: it clears the acting seat's
+   * strike count, which `turnTimers` then reads for the countdown it
+   * broadcasts. See `MutableTurnObserver.run`.
+   */
+  const turns = new MutableTurnObserver((error: unknown) =>
+    logger.error({ err: error }, 'turn observer threw'),
+  )
+
   const games = new GameSessionService({
     uow,
     repos,
@@ -239,7 +281,38 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
     logger,
     rateLimiter,
     clock: overrides.clock ?? systemClock,
+    turns,
   })
+
+  const turnTimers = new TurnTimerService({
+    repos,
+    registry,
+    realtime,
+    metrics,
+    logger,
+    clock: overrides.clock ?? systemClock,
+    ...(turnTimerMirror === null ? {} : { mirror: turnTimerMirror }),
+  })
+
+  const seats = new SeatEnforcementService({
+    repos,
+    registry,
+    games,
+    timers: turnTimers,
+    realtime,
+    chat,
+    metrics,
+    logger,
+    clock: overrides.clock ?? systemClock,
+  })
+
+  seats.attach()
+  turns.attach(seats)
+  turns.attach(turnTimers)
+  // The disconnect path into the *same* ejection, with a different reason —
+  // 04 §5.2. The mechanism shipped at S25; this is the consequence it was
+  // waiting for.
+  presence.onGraceExpired((event) => seats.onGraceExpired(event))
 
   const invites = new InviteService({
     repos,
@@ -272,8 +345,12 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
     presence,
     chat,
     games,
+    turnTimers,
+    seats,
+    turns,
     redis,
     presenceMirror,
+    turnTimerMirror,
     checkReadiness: async () => ({
       database: await checkDatabase(prisma),
       // Reported only when configured. An unconfigured dependency listed as
@@ -285,6 +362,12 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
       // Presence first: it holds armed grace timers, and one firing against a
       // disconnected Prisma client would log an error during every shutdown.
       presence.stop()
+      // Same reasoning, and the same failure mode: an armed turn deadline
+      // firing against a disconnected Prisma client is an error on every
+      // shutdown, and a bot move scheduled behind it is a second one.
+      turnTimers.stop()
+      seats.stop()
+      turns.detachAll()
       rateLimiter.dispose()
       await Promise.all([redis?.close(), prisma.$disconnect()])
     },

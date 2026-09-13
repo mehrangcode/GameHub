@@ -1,11 +1,12 @@
 import type { Logger } from 'pino'
 import { ILLEGAL_MOVE_ALERT_RULE } from '../../config/socketLimits.js'
 import { SYSTEM_MESSAGE_KEYS } from '../../contracts/dto/chat.js'
-import type { SecuritySeverity } from '../../contracts/enums.js'
+import type { GameEventKind, SecuritySeverity } from '../../contracts/enums.js'
 import type {
   GameFinishedPayload,
   GameNarrationPayload,
   GameStatePayload,
+  NarrationKind,
   SeatingView,
 } from '../../contracts/events.js'
 import type { SeatAssignment, GameEvent, GameInstance } from '../../domain/entities/game.js'
@@ -44,6 +45,7 @@ import type { Clock } from '../ports/clock.js'
 import type { IRateLimiter } from '../ports/rateLimiter.js'
 import { systemClock } from '../ports/clock.js'
 import { seatRoom, spectatorRoom, tableRoom, type IRealtimePublisher } from '../ports/realtime.js'
+import { isTimerEvent, type TurnObserver } from '../ports/turns.js'
 import type { ChatService } from './ChatService.js'
 import type { GameCatalogService } from './GameCatalogService.js'
 import type { MetricsRegistry } from './MetricsRegistry.js'
@@ -99,6 +101,13 @@ export interface GameSessionDeps {
   readonly seedRng?: Rng
   /** Counts rejections for the illegal-move escalation. Optional; absent ⇒ never escalate. */
   readonly rateLimiter?: IRateLimiter
+  /**
+   * S31, optional. Told after every state change so turn timers can arm and
+   * bots can play — see `application/ports/turns.ts` for why this is a port and
+   * not a call. Absent in every unit test of the move pipeline, which has no
+   * interest in either.
+   */
+  readonly turns?: TurnObserver
 }
 
 /** Who is asking. `isHost` is derived from the table row, never from a request. */
@@ -115,6 +124,9 @@ export interface RebuiltGame {
   /** The seq of the newest event applied. `0` when the log is empty. */
   readonly seq: number
 }
+
+/** Who moved, for the turn observers. See `application/ports/turns.ts`. */
+export type ActedBy = { readonly seat: SeatId; readonly by: 'human' | 'timeout' | 'bot' }
 
 export interface AppliedMove {
   readonly instance: GameInstance
@@ -319,6 +331,59 @@ export class GameSessionService {
      */
     const seat = await this.seatOf(instance.tableId, input.identity)
 
+    return this.apply({ instance, seat, move: input.move, clientMoveId: input.clientMoveId })
+  }
+
+  /**
+   * ★ A move the **server** makes on a seat's behalf — S32's timeout default
+   * action and S33's bot, 04 §6.5.
+   *
+   * It goes through the same pipeline as a human's move, on purpose, and that
+   * single decision is what gets it the idempotency key, the `AUDIT` trail on
+   * rejection, the snapshot policy, the per-viewer broadcast and the replay
+   * guarantee for free. A second, quieter write path for automated moves is how
+   * a bot's card ends up missing from a replay eighteen months from now.
+   *
+   * Two things differ from a human's move and both are deliberate:
+   *
+   * | | |
+   * |---|---|
+   * | `kind` | `TIMEOUT` for a default action, so the log distinguishes "played" from "did not play in time". `isInputEvent` tests for a `move` in the payload rather than for `kind === 'MOVE'`, so it still replays |
+   * | attribution | A timeout's default action **is** the seat's move and is attributed to them; a bot's move after ejection carries no actor, because attributing it to the absent human would make the match history claim they played it |
+   */
+  async applySystemMove(input: {
+    readonly gameId: string
+    readonly seat: SeatId
+    readonly move: Record<string, unknown>
+    readonly clientMoveId: string
+    readonly by: 'timeout' | 'bot'
+    /** Merged into the input event's payload — `strikes`, for the narration. */
+    readonly extra?: Record<string, unknown>
+  }): Promise<AppliedMove> {
+    const instance = await this.requireActive(input.gameId)
+
+    return this.apply({
+      instance,
+      seat: input.seat,
+      move: input.move,
+      clientMoveId: input.clientMoveId,
+      kind: input.by === 'timeout' ? 'TIMEOUT' : 'MOVE',
+      anonymous: input.by === 'bot',
+      ...(input.extra === undefined ? {} : { extra: input.extra }),
+    })
+  }
+
+  private async apply(input: {
+    readonly instance: GameInstance
+    readonly seat: SeatId
+    readonly move: Record<string, unknown>
+    readonly clientMoveId: string
+    readonly kind?: GameEventKind
+    readonly anonymous?: boolean
+    readonly extra?: Record<string, unknown>
+  }): Promise<AppliedMove> {
+    const { instance, seat } = input
+
     // Idempotency before any work: a retry after a dropped ack must cost one
     // indexed lookup, not a rebuild and a second card on the table.
     const prior = await this.deps.repos.events.findByClientMoveId(instance.id, input.clientMoveId)
@@ -330,7 +395,11 @@ export class GameSessionService {
     let outcome: MoveOutcome
     try {
       outcome = await this.deps.uow.run(async (repos) =>
-        this.applyWithin(repos, instance, seat, input.move, input.clientMoveId),
+        this.applyWithin(repos, instance, seat, input.move, input.clientMoveId, {
+          ...(input.kind === undefined ? {} : { kind: input.kind }),
+          anonymous: input.anonymous ?? false,
+          extra: input.extra ?? {},
+        }),
       )
     } catch (error) {
       // The transaction has rolled back, so the rejection is audited in its own
@@ -348,7 +417,10 @@ export class GameSessionService {
     }
 
     this.narrate(rebuilt, outcome.appended)
-    await this.broadcastState(rebuilt)
+    await this.broadcastState(rebuilt, {
+      seat,
+      by: input.kind === 'TIMEOUT' ? 'timeout' : (input.anonymous ?? false) ? 'bot' : 'human',
+    })
     if (outcome.finished !== null) this.announceFinish(outcome.instance, outcome.finished)
 
     this.deps.metrics.increment('moves_applied')
@@ -366,6 +438,7 @@ export class GameSessionService {
     seat: SeatId,
     move: Record<string, unknown>,
     clientMoveId: string,
+    system: SystemMoveOptions = { anonymous: false, extra: {} },
   ): Promise<MoveOutcome> {
     const { instance, engine, state, seq } = await this.rebuildState(loaded.id, repos)
 
@@ -395,14 +468,17 @@ export class GameSessionService {
     for (const [index, event] of emitted.entries()) {
       const row = await repos.events.append({
         gameId: instance.id,
-        kind: event.kind,
+        // The override applies to the *input* event alone: a timeout still
+        // deals the next street as a `DEAL`, and relabelling everything the
+        // transition emitted would make the log lie about what happened after.
+        kind: index === 0 ? (system.kind ?? event.kind) : event.kind,
         seat: event.seat,
-        ...actorFields(seat, instance),
+        ...(system.anonymous ? {} : actorFields(seat, instance)),
         // ★ Only the *input* event carries the idempotency key. A derived
         // `PHASE` row that also carried it would occupy the unique slot and
         // make a legitimate retry look like a replay of something it never sent.
         ...(index === 0 ? { clientMoveId } : {}),
-        payload: index === 0 ? { ...event.payload, move } : event.payload,
+        payload: index === 0 ? { ...event.payload, ...system.extra, move } : event.payload,
       } satisfies NewGameEvent)
 
       if (index === 0 && row.seq !== inputSeq) {
@@ -537,6 +613,12 @@ export class GameSessionService {
 
     const missed = await this.deps.repos.events.listByGame(instance.id, input.lastSeq! + 1)
     for (const event of missed) {
+      // A persisted deadline is bookkeeping, not narration: replaying it would
+      // put one "phase changed" line per turn into a reconnecting client's move
+      // log. The *current* deadline reaches the socket separately, from
+      // `TurnTimerService.announceToSocket` — a stale one would be worse than
+      // none, since the client would count down to an instant already passed.
+      if (isTimerEvent(event.payload)) continue
       this.deps.realtime.publishToSocket(
         input.socketId,
         'game:event',
@@ -570,7 +652,7 @@ export class GameSessionService {
    * correct: a spectator view is public by definition, and the leak suite
    * asserts it holds no seat's hidden information for any seat.
    */
-  async broadcastState(rebuilt: RebuiltGame): Promise<void> {
+  async broadcastState(rebuilt: RebuiltGame, acted: ActedBy | null = null): Promise<void> {
     const { instance } = rebuilt
     const table = await this.deps.tables.require(instance.tableId)
     const members = await this.deps.repos.tables.listMembers(instance.tableId)
@@ -594,6 +676,31 @@ export class GameSessionService {
       )
       this.deps.metrics.increment('game_states_projected')
     }
+
+    /**
+     * ★ The Phase H seam, and the *only* one — `application/ports/turns.ts`.
+     *
+     * Every path that can change whose turn it is ends here: the deal, a human
+     * move, a timeout's default action and a bot's move. Announcing once, from
+     * the one place that already knows the new state, is what stops "re-arm the
+     * turn timer" from being a line four callers have to remember.
+     *
+     * It is the last thing this method does, and it is **awaited**: the timer's
+     * own `PHASE` append would otherwise race the next move's transaction for a
+     * `seq`. It still cannot throw — the observer hub swallows — because a move
+     * already written to the log must not be undone by a timer that failed to
+     * arm.
+     */
+    await this.deps.turns?.onTurn({
+      gameId: instance.id,
+      tableId: instance.tableId,
+      gameSlug: instance.gameSlug,
+      seat: readToAct(rebuilt.state) === null ? null : seatId(readToAct(rebuilt.state)!),
+      phase: readPhase(rebuilt.state),
+      seq,
+      terminal: rebuilt.engine.isTerminal(rebuilt.state),
+      acted,
+    })
   }
 
   /** One viewer's payload. The only place `projectState` is called for the wire. */
@@ -626,6 +733,59 @@ export class GameSessionService {
   /** The omniscient projection — replay, dispute resolution, never a broadcast. */
   inspect(rebuilt: RebuiltGame): unknown {
     return rebuilt.engine.projectState(rebuilt.state, OMNISCIENT)
+  }
+
+  // ── S34: boot reconciliation ──────────────────────────────────────────────
+
+  /**
+   * Finishes any `ACTIVE` game whose rebuilt state is already terminal — the
+   * startup half of S34.
+   *
+   * ### When this can actually fire
+   *
+   * Rarely, and that is the point of writing it down. A move and its `finish`
+   * commit in one transaction, so the ordinary path cannot leave the two
+   * disagreeing. What *can* is a transition the process died in the middle of
+   * announcing, or — the case this is really for — a row left `ACTIVE` by an
+   * older version of this code, a restored backup, or a hand-edited database.
+   *
+   * Running it at boot costs one rebuild per live game and turns a class of
+   * "this table is stuck forever" bug into a log line. It is deliberately
+   * separate from `TurnTimerService.resume()`, which runs straight after: a
+   * finished game must not have a deadline re-armed against it.
+   */
+  async reconcileActive(): Promise<number> {
+    const active = await this.deps.repos.games.listActive()
+    let settled = 0
+
+    for (const instance of active) {
+      try {
+        const rebuilt = await this.rebuildState(instance.id)
+        if (!rebuilt.engine.isTerminal(rebuilt.state)) continue
+
+        const at = this.now()
+        await this.deps.repos.games.finish(instance.id, 'FINISHED', at)
+        const revealed = await this.deps.repos.games.revealSeed(instance.id, at)
+        await this.deps.repos.tables.update(instance.tableId, { status: 'FINISHED' })
+
+        this.announceFinish(revealed, { result: rebuilt.engine.result(rebuilt.state), at })
+        settled += 1
+
+        this.deps.logger.warn(
+          { gameId: instance.id, tableId: instance.tableId },
+          'active game was already terminal at boot; settled',
+        )
+      } catch (error) {
+        // One unreconcilable game must not stop the process from booting — and
+        // must not stop the other games' deadlines from being re-armed.
+        this.deps.logger.error(
+          { err: error, gameId: instance.id },
+          'could not reconcile active game at boot',
+        )
+      }
+    }
+
+    return settled
   }
 
   // ── Snapshot maintenance ──────────────────────────────────────────────────
@@ -693,12 +853,15 @@ export class GameSessionService {
   }
 
   private narrationOf(rebuilt: RebuiltGame, event: GameEvent): GameNarrationPayload {
+    const strikes = event.payload['strikes']
+
     return {
       gameId: rebuilt.instance.id,
       tableId: rebuilt.instance.tableId,
       seq: event.seq,
-      kind: event.kind,
+      kind: narrationKindOf(event),
       seat: event.seat,
+      ...(typeof strikes === 'number' ? { strikes } : {}),
       /**
        * ★ An i18n key plus params, never a rendered sentence (02 §8.1) — the
        * same discipline as `SYSTEM` chat rows. A move log written in English
@@ -845,6 +1008,44 @@ interface GameFinish {
   readonly at: Date
 }
 
+/** What {@link GameSessionService.applySystemMove} changes about an ordinary move. */
+interface SystemMoveOptions {
+  /** `TIMEOUT` for a default action applied on a strike. Input event only. */
+  readonly kind?: GameEventKind
+  /** A bot's move records no actor: the absent human did not play it. */
+  readonly anonymous: boolean
+  /** Merged into the input event's payload — `strikes`, for the narration. */
+  readonly extra: Record<string, unknown>
+}
+
+/**
+ * ★ The log's vocabulary → the table's — 03 §4 vs 04 §5.2/§6.2.
+ *
+ * Six kinds are persisted and ten are narrated, and the difference is not an
+ * inconsistency between the two documents: a timeout is *stored* as `TIMEOUT`
+ * so `isInputEvent` replays the default action it applied, and *narrated* as
+ * `TURN_TIMEOUT` so the client can render "Sara timed out — strike 1 of 2"
+ * instead of a bare phase change. Ejection, substitution and return are stored
+ * as `SYSTEM` rows carrying a `system` discriminator for exactly the same
+ * reason.
+ *
+ * Derived here, from the row, rather than by the client guessing from a
+ * payload — which is what makes it one function with one test rather than a
+ * convention every renderer re-implements.
+ */
+export function narrationKindOf(event: GameEvent): NarrationKind {
+  if (event.kind === 'TIMEOUT') return 'TURN_TIMEOUT'
+
+  if (event.kind === 'SYSTEM') {
+    const system = event.payload['system']
+    if (system === 'BOT_TOOK_OVER' || system === 'PLAYER_RETURNED' || system === 'SEAT_ABANDONED') {
+      return system
+    }
+  }
+
+  return event.kind
+}
+
 interface MoveOutcome {
   readonly instance: GameInstance
   readonly engine: AnyGameEngine
@@ -958,12 +1159,33 @@ function readToAct(state: unknown): number | null {
  * moved past, and an engine that throws there would otherwise turn a played
  * card into a 500 *after* it was written to the log.
  */
+/**
+ * The handful of payload fields a narration template may interpolate.
+ *
+ * A whitelist rather than a spread: an event payload can hold anything an
+ * engine put there, and passing it wholesale to a translation string is how a
+ * hidden field ends up rendered in a move log that spectators can read.
+ */
+function describableParams(payload: Record<string, unknown>): Record<string, unknown> {
+  const params: Record<string, unknown> = {}
+  for (const key of ['strikes', 'reason', 'phase'] as const) {
+    if (Object.hasOwn(payload, key)) params[key] = payload[key]
+  }
+  return params
+}
+
 function describeSafely(
   rebuilt: RebuiltGame,
   event: GameEvent,
 ): { key: string; params: Record<string, unknown> } | null {
   if (!isInputEvent(event)) {
-    return { key: `games.event.${event.kind.toLowerCase()}`, params: { seat: event.seat } }
+    // Keyed off the *narration* kind, so an ejection reads
+    // `games.event.bot_took_over` rather than an undifferentiated
+    // `games.event.system` that no translator could write a sentence for.
+    return {
+      key: `games.event.${narrationKindOf(event).toLowerCase()}`,
+      params: { seat: event.seat, ...describableParams(event.payload) },
+    }
   }
 
   try {

@@ -6,6 +6,7 @@ import type {
   TableOrigin,
   TableStatus,
 } from '../../contracts/enums.js'
+import type { TurnEnforcement } from '../../contracts/dto/turnEnforcement.js'
 import type { SeatId } from '../value-objects/seat.js'
 
 export interface Table {
@@ -20,6 +21,15 @@ export interface Table {
   readonly rewardEligible: boolean
   /** Validated against `GameEngine.meta.optionsSchema` before it gets here. */
   readonly options: Record<string, unknown>
+  /**
+   * Turn-enforcement policy (04 §6.3). `null` ⇒ the platform defaults.
+   *
+   * Kept nullable rather than resolved at the repository, because the two
+   * states mean different things: a table that never expressed a preference
+   * should follow the defaults *as they change*, and one that did should keep
+   * what its host chose.
+   */
+  readonly turnEnforcement: TurnEnforcement | null
   readonly seatCount: number
   readonly allowSpectators: boolean
   readonly requireApproval: boolean

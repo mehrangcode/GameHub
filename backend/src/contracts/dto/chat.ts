@@ -102,6 +102,9 @@ export const SYSTEM_MESSAGE_KEYS = {
   playerReconnected: 'table.system.playerReconnected',
   gameStarted: 'table.system.gameStarted',
   gameFinished: 'table.system.gameFinished',
+  /** Phase H. The transcript is where "why is a bot playing seat 1?" is answered. */
+  playerEjected: 'table.system.playerEjected',
+  playerReturned: 'table.system.playerReturned',
 } as const
 
 export type SystemMessageKey = (typeof SYSTEM_MESSAGE_KEYS)[keyof typeof SYSTEM_MESSAGE_KEYS]

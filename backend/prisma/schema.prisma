@@ -163,6 +163,10 @@ model Table {
 
   /// Validated against GameEngine.meta.optionsSchema. JSON string.
   optionsJson     String
+  /// Turn-enforcement policy (04 §6.3). Null = platform defaults, which is
+  /// deliberately not the same as "{}": a null row picks up a later change to
+  /// the defaults, a written one keeps what the host chose.
+  turnEnforcementJson String?
   seatCount       Int
   allowSpectators Boolean @default(true)
   /// Host must approve each join (defence for a leaked link).

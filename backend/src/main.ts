@@ -26,6 +26,37 @@ const app = buildApp(container)
 const server = createServer(app)
 const gateway = createGateway({ httpServer: server, container })
 
+/**
+ * ★ Picking up where the last process left off — S34, 04 §5.4.
+ *
+ * Two steps, in this order and no other:
+ *
+ *   1. settle any game whose state is already terminal, so a finished match
+ *      cannot have a deadline armed against it;
+ *   2. re-arm every remaining `ACTIVE` game from its **persisted** `endsAt`.
+ *
+ * The property that matters is what step 2 does not do: it never computes a new
+ * deadline. A player who was five seconds from timing out when the process died
+ * is five seconds from timing out when it returns, and a deadline that passed
+ * during the downtime fires immediately. A deploy is not a way to buy thinking
+ * time, and the other three players at that table already paid for the outage.
+ *
+ * It runs after `listen` rather than before it, deliberately: a slow sweep must
+ * not delay the port opening, and every timer it arms is absolute, so arming
+ * one late costs nothing.
+ */
+async function resumeTimers(): Promise<void> {
+  try {
+    const settled = await container.games.reconcileActive()
+    const rearmed = await container.turnTimers.resume()
+    container.logger.info({ settled, rearmed }, 'turn deadlines resumed')
+  } catch (error) {
+    // A failed sweep leaves some tables untimed until their next move, which is
+    // recoverable. Refusing to boot is not.
+    container.logger.error({ err: error }, 'could not resume turn deadlines')
+  }
+}
+
 server.listen(env.PORT, () => {
   container.logger.info(
     {
@@ -36,6 +67,7 @@ server.listen(env.PORT, () => {
     },
     'api listening',
   )
+  void resumeTimers()
 })
 
 /**

@@ -141,18 +141,31 @@ describe('★ no private projection may be addressed to a public room', () => {
   })
 })
 
-describe('the seat room is reachable from the projection path only', () => {
+describe('the seat room is reachable from a short, named list of places', () => {
   /**
-   * The projection path itself — the one place outside the socket layer that
-   * may name a seat room, because it *is* the mechanism the room exists for.
-   * Adding a second entry here should feel expensive; that is the point.
+   * ★ Every service outside the socket layer that may address one seat.
+   *
+   * This list is meant to be expensive to extend, and it is written out rather
+   * than pattern-matched so that extending it is a decision somebody makes in a
+   * diff. Each entry needs a reason that survives the question *"why can this
+   * not go to the table?"*:
+   *
+   * | | |
+   * |---|---|
+   * | `GameSessionService` | **The** projection path. It *is* the mechanism the seat room exists for: `projectState` once per viewer, each payload to the one room entitled to it (04 §4.1) |
+   * | `TurnTimerService` | `game:ejectionWarning` (04 §6.2). A private nudge — broadcasting it would shame somebody in front of the table *and* tell the other three exactly when to expect a free trick |
+   * | `SeatEnforcementService` | `game:rewardPreview` (04 §6.6). What this ejection costs *you*. Somebody else's forfeit is nobody else's business |
+   *
+   * Anything else wanting to reach a seat should be publishing through the
+   * port, where the addressing decision is reviewable.
    */
-  const PROJECTION_PATH = 'application/services/GameSessionService.ts'
+  const SEAT_ADDRESSABLE = [
+    'application/services/GameSessionService.ts',
+    'application/services/TurnTimerService.ts',
+    'application/services/SeatEnforcementService.ts',
+  ]
 
-  it('nothing outside the socket layer and the projection path names a seat room', () => {
-    // Keeps the private channel from acquiring a second caller by accident. A
-    // service that wants to reach a seat should be publishing through the port,
-    // where the addressing decision is reviewable.
+  it('nothing outside the socket layer and that list names a seat room', () => {
     const callers = sources
       .filter(({ text }) => /\bseatRoom\(/.test(text))
       .map((file) => file.path)
@@ -160,9 +173,19 @@ describe('the seat room is reachable from the projection path only', () => {
         (path) =>
           !path.startsWith('interface/socket/') &&
           path !== 'application/ports/realtime.ts' &&
-          path !== PROJECTION_PATH,
+          !SEAT_ADDRESSABLE.includes(path),
       )
 
     expect(callers).toEqual([])
+  })
+
+  it('★ and the two Phase H additions send no game state down that channel', () => {
+    // The reason the list above is safe to extend: a warning and a reward
+    // preview carry no projection. If either service ever learns to emit
+    // `game:state`, the single-emitter assertion in this file fails first.
+    for (const path of SEAT_ADDRESSABLE.slice(1)) {
+      const file = sources.find((entry) => entry.path === path)!
+      expect(/'game:state'/.test(file.text), `${path} must not emit game state`).toBe(false)
+    }
   })
 })

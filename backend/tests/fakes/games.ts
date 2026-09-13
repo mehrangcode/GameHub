@@ -49,6 +49,15 @@ export class InMemoryGameInstanceRepository implements IGameInstanceRepository {
     return this.rows.find((g) => g.tableId === tableId && g.status === 'ACTIVE')
   }
 
+  async listActive(): Promise<GameInstance[]> {
+    return cloneAll(
+      this.rows
+        .all()
+        .filter((g) => g.status === 'ACTIVE')
+        .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime()),
+    )
+  }
+
   async listByTable(tableId: string): Promise<GameInstance[]> {
     return cloneAll(
       this.rows

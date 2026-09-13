@@ -229,6 +229,19 @@ model Table {
   rewardEligible Boolean @default(true)
   /** Table options validated against GameEngine.meta.optionsSchema. JSON string. */
   optionsJson  String
+  /**
+   * Turn-enforcement policy — 04 §6.3 (ejectAfterStrikes, warningSeconds,
+   * strikesResetOnAction, reclaimWindowSec). JSON string.
+   *
+   * Its own column rather than a corner of optionsJson, because it is platform
+   * policy rather than game rules: "how long may you think" is the engine's to
+   * declare, "how many lapses cost you the seat" is the table's to decide, and
+   * it means the same thing in every game.
+   *
+   * Null ≠ "{}": a table that never expressed a preference follows the platform
+   * defaults as they change, while one that did keeps what its host chose.
+   */
+  turnEnforcementJson String?
   seatCount    Int
   allowSpectators Boolean @default(true)
   /** Host must approve each join (defence for a leaked link). */

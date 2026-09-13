@@ -22,6 +22,7 @@ import type {
   UserStatus,
   WalletStatus,
 } from '../../contracts/enums.js'
+import type { TurnEnforcement } from '../../contracts/dto/turnEnforcement.js'
 import type {
   PlacementTable,
   RewardRule,
@@ -137,12 +138,20 @@ export function toUserCosmetic(row: Rows.UserCosmetic): UserCosmetic {
 }
 
 export function toTable(row: Rows.Table): Table {
-  const { optionsJson, ...rest } = row
+  const { optionsJson, turnEnforcementJson, ...rest } = row
   return {
     ...rest,
     status: row.status as TableStatus,
     origin: row.origin as TableOrigin,
     options: parseJson<Record<string, unknown>>(optionsJson),
+    /**
+     * Parsed, not validated, on the way out. A stored setting was validated by
+     * the schema on the way *in*; re-parsing here would turn a row written by
+     * an older version of the schema into an exception on every read of the
+     * table, which is a worse failure than a stale field.
+     */
+    turnEnforcement:
+      turnEnforcementJson === null ? null : parseJson<TurnEnforcement>(turnEnforcementJson),
   }
 }
 

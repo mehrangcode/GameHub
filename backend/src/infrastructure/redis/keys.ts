@@ -44,6 +44,23 @@ export function presenceKey(tableId: string): string {
   return `${REDIS_NAMESPACE}:presence:${tableId}`
 }
 
+/**
+ * ★ A turn deadline, mirrored per game — S31, 04 §6.1.
+ *
+ * 04 §6.1 asks for the deadline in Redis **and** as a `PHASE` game event, and
+ * the redundancy is the point: the event is the record that survives a restart
+ * (and exists on a laptop with no Redis at all), while this is what lets a
+ * second API instance render a countdown it did not arm.
+ *
+ * Note it holds an **absolute instant and nothing else** — no state, no seat's
+ * cards, no strike history. That is what keeps a timer key on the right side of
+ * 02 §3.2's "game state must never be in Redis": losing this costs a countdown
+ * ring until the next turn, never a hand.
+ */
+export function turnTimerKey(gameId: string): string {
+  return `${REDIS_NAMESPACE}:timer:${gameId}`
+}
+
 /** The channel prefix `@socket.io/redis-adapter` publishes room traffic on. */
 export const SOCKET_ADAPTER_PREFIX = `${REDIS_NAMESPACE}:socket.io`
 

@@ -74,6 +74,32 @@ export default tseslint.config(
             'Math.random() is banned in domain/ (05-game-engine-spec.md §3). ' +
             'Engines take an injected Rng; shuffle is Fisher-Yates over rng.int(i + 1).',
         },
+        /**
+         * ★ The other half of invariant I1, added at S31.
+         *
+         * Randomness was banned from the domain at S01 and time was not, which
+         * left half an invariant enforced. Phase H is exactly when that gap
+         * would be filled by accident: turn limits are a *declaration* on
+         * `GameMeta` and are enforced by `TurnTimerService`, and the tempting
+         * shortcut — an engine checking how long a player has been thinking —
+         * would make a replay of `(seed, moves[])` stop reproducing the match.
+         * Time comes in through `application/ports/clock.ts`, in the service
+         * layer, or not at all.
+         */
+        {
+          selector: "MemberExpression[object.name='Date'][property.name='now']",
+          message:
+            'Date.now() is banned in domain/ (05-game-engine-spec.md §2, invariant I1). ' +
+            'Engines are pure and deterministic: time is injected, and turn limits are ' +
+            'declared in GameMeta and enforced by TurnTimerService.',
+        },
+        {
+          selector: "NewExpression[callee.name='Date']",
+          message:
+            'new Date() is banned in domain/ (05-game-engine-spec.md §2, invariant I1). ' +
+            'A state holding a Date also breaks I5 (JSON-serializable) — use an ISO string ' +
+            'or a number supplied by the caller.',
+        },
       ],
     },
   },

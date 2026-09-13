@@ -6,6 +6,7 @@ import type {
   TableDetail,
   TableSummary,
 } from '../../contracts/dto/tables.js'
+import { withTurnEnforcementDefaults } from '../policies/turnEnforcement.js'
 import type { Table, TableMember } from '../../domain/entities/table.js'
 import type { IdentityRef } from '../../domain/value-objects/identity.js'
 import { seatRange, type SeatId } from '../../domain/value-objects/seat.js'
@@ -258,6 +259,9 @@ export function toTableDetail(
     options: table.options,
     allowSpectators: table.allowSpectators,
     requireApproval: table.requireApproval,
+    // Resolved, exactly like `options`: what you read is what you will be held
+    // to, whether or not this table ever set it.
+    turnEnforcement: withTurnEnforcementDefaults(table.turnEnforcement),
     seats: toSeatViews(table, members, directory, viewer),
     spectatorCount: active.filter((member) => member.seat === null).length,
   }

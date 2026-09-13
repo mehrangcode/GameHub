@@ -7,12 +7,79 @@
 | | |
 |---|---|
 | **Milestone** | M0 — Platform Skeleton |
-| **Last session completed** | **S01–S30 (Phases A + B + C + D + E + F + G) built and green — not yet verified by Mehrang** |
-| **Next session** | **S31 — `TurnTimerService`, absolute deadlines, `game:turnTimer`** (3 h, 🔌) — starts Phase H |
+| **Last session completed** | **S01–S34 (Phases A + B + C + D + E + F + G + H) built and green — not yet verified by Mehrang** |
+| **Next session** | **S35 — `RewardService.compute`, the pure policy function** (2.5 h, 🧪) — starts Phase I |
 | **Blocked on** | Nothing in code. The two older environment items only (port 3000, Playwright deps) |
-| **Repo state** | `backend/` and `frontend/` exist. **1427 backend tests**, 18 frontend tests. No `admin-frontend/` (MA) |
+| **Repo state** | `backend/` and `frontend/` exist. **1503 backend tests**, 18 frontend tests. No `admin-frontend/` (MA) |
 
-Session spec for S31: `Documents/11-build-plan.md` §10.
+Session spec for S35: `Documents/11-build-plan.md` §11.
+
+**M0's headline exit criterion is now demonstrable**: *an idle player is warned,
+struck twice, ejected, replaced by a bot, and the table plays on to a finish.*
+`tests/integration/ejection.test.ts` walks exactly that sentence, and
+`requests/socket.md`'s Phase H section walks it by hand in two terminals.
+
+## Phase H — what to verify (the gate for S31–S34)
+
+```bash
+cd backend
+npm run typecheck && npm run lint && npm test          # 1503 tests
+```
+
+**`backend/requests/socket.md` now carries a Phase H section** with the whole
+escalation in real time. Read that rather than this summary if you are actually
+sitting down to do it — it is about a minute of deliberately doing nothing.
+
+**The names to read, in order of what they protect:**
+
+| Test | What breaks without it |
+|---|---|
+| `★★ two strikes eject seat 0, a bot takes over, and the table plays on to a finish` | **The M0 exit criterion.** Everything else in Phase H is the fairness around this one sentence |
+| `★★ reaches the acting seat and NOBODY else` | A private warning becomes a public shaming — and tells the other players exactly when to expect a free trick |
+| `★★ re-arms the IDENTICAL absolute deadline after a fresh container` | A deploy becomes a way to buy thinking time. Asserts the *same instant*, never "roughly 30 seconds" |
+| `★ EJECTED_TIMEOUT and EJECTED_ABANDON stay distinct` | 04 §5.2's explicit warning, and 10 §5.1 pays the two differently. One `EJECTED` value would erase it forever |
+| `★ ejection is idempotent — a second expiry does not double-eject` | Both timers point at one seat and can genuinely both fire. A double ejection resets the reclaim window and makes the player's own seat final |
+| `★ a returned player is REPLACED_RETURNED even though the ejection is still logged` | A reclaim *clears* the member row, so the log is the only thing that remembers. Without it, coming back pays the same as never leaving |
+| `★ strikesResetOnAction: true — a real move clears the count` | Strikes become a lifetime record, and one lapse now plus one twenty minutes ago ejects somebody mid-match |
+| `★ its default action is PASS, never PRESS` | The per-game version of 04 §6.5. M2 and M5 reuse this shape for "never auto-hit" and "never auto-call" |
+| `★ the bot never plays an illegal move — 300 seeds` | A bot is *our* code and gets no more trust than a client |
+| `★ rejects an engine importing the turn timer service` | An engine that can reach a timer can read a clock, and invariant I1 stops being checkable |
+| `★ and the two Phase H additions send no game state down that channel` | The seat-room allowlist grew by two files; this is what keeps growing it cheap and safe |
+
+```bash
+# S31 + S32 — deadlines, the private warning, and the strike ladder.
+npx vitest run tests/integration/turn-timer.test.ts --reporter=verbose
+
+# S33 + S34 — the exit criterion, the two reasons, the reclaim matrix, the restart.
+npx vitest run tests/integration/ejection.test.ts --reporter=verbose
+
+# The pure half: the options schema, the outcome mapper, the narration vocabulary.
+npx vitest run tests/unit/turn-enforcement.test.ts --reporter=verbose
+
+# And over a real socket, where the privacy actually lives.
+npx vitest run tests/integration/socket/turn-enforcement.test.ts --reporter=verbose
+```
+
+### Live — two terminals, and a minute of doing nothing
+
+```bash
+PORT=3999 npm run dev
+npx tsx scripts/dev-socket.ts --url http://localhost:3999 --cookies /tmp/c.txt --join $TID --seat 0
+npx tsx scripts/dev-socket.ts --url http://localhost:3999 --cookies /tmp/g.txt --join $TID --seat 1
+```
+
+`start`, then `idle` in terminal 1. At t−10 s terminal 1 alone prints
+`game:ejectionWarning`; at t−0 **both** print `game:event { kind: 'TURN_TIMEOUT',
+strikes: 1 }` and play moves on. Press once from terminal 2, lapse again, and
+terminal 1 is ejected, replaced by a bot, and told it will earn nothing. Keep
+pressing in terminal 2 until the bot finishes the match.
+
+**★★ The one thing to look hardest at:** terminal 2 never sees the warning or the
+reward preview. Both are seat-private (04 §6.2, §6.6); everything else is public.
+
+Then `reclaim` inside 120 s (→ `REPLACED_RETURNED`, 0.5×) and after it (→
+`SEAT_NOT_RECLAIMABLE`). Finally, note an `endsAt`, kill the server, wait ten
+seconds, restart, and confirm the re-armed deadline is the **same instant**.
 
 ## Phase G — what to verify (the gate for S28–S30)
 
@@ -110,6 +177,24 @@ Linux binaries. `npm run db:generate` was re-run afterwards, so both Prisma engi
 
 **To run `npm test` in `backend/` from Windows, re-run `npm install` there first.** Nothing else
 needs doing — the Prisma client is dual-target and `argon2` ships prebuilds for both.
+
+### ⚠ Update, 2026-09-12 (S31–S34): `backend/` is **Windows**-owned again, and now runs from both
+
+Something re-ran `npm install` from Windows between Phase G and Phase H, so `esbuild` and `rollup`
+had swapped back to their win32 binaries and Vitest would not start under WSL. Rather than flip the
+whole tree a third time, the two **Linux** binaries were unpacked *alongside* the Windows ones:
+
+```bash
+npm pack @rollup/rollup-linux-x64-gnu@4.63.1 @esbuild/linux-x64@0.28.2   # in a temp dir
+tar xzf rollup-…tgz -C node_modules/@rollup/rollup-linux-x64-gnu --strip-components=1
+tar xzf esbuild-…tgz -C node_modules/@esbuild/linux-x64      --strip-components=1
+```
+
+`node_modules/@rollup/` and `node_modules/@esbuild/` now hold **both** platforms, exactly as
+`.prisma/client` already holds both query engines, so `npm test` runs from Windows *and* from WSL
+with no further work. **Any future `npm install` from either OS will drop the other platform's
+binaries again** — the two commands above restore them in about ten seconds, and the versions must
+match `node_modules/rollup/package.json` and `node_modules/esbuild/package.json` exactly.
 
 `frontend/node_modules` is **still Windows-owned** and was deliberately not touched. Its
 `typecheck`, `lint` and `contracts:check` are green (all pure JS); its **18 Vitest tests were not
@@ -615,6 +700,33 @@ hook (S178), `contracts:sync`/`check`, the test global setup and the seed test a
 `node <resolved cli.js>` — see `tests/bin.ts`. So the failure you get from Windows is now an honest
 "missing Prisma engine for this platform" rather than a misleading `ENOENT` on `npx`.
 
+## Decisions made while building Phase H (2026-09-12)
+
+| Decision | Value | Why |
+|---|---|---|
+| **★ `ejectAfterStrikes` defaults to 2** | the open question, now closed | 04 §6.3's recommendation, and Mehrang chose it over his own literal rule. A single 30-second lapse — a doorbell, a tunnel — would otherwise eject somebody from a 45-minute Shelem match and forfeit their coins, which is harsh enough to make people avoid the long games. Two strikes still removes a genuinely absent player inside about a minute. **The literal rule is one field away** (`{"ejectAfterStrikes": 1}` on the table) and has its own test |
+| **★ `turnEnforcement` gets its own column, not a corner of `optionsJson`** | `Table.turnEnforcementJson String?` | It is platform policy, not game rules: "how long may you think" is the engine's to declare, "how many lapses cost you the seat" is the table's to decide, and it means the same thing in Shelem as in Poker. Putting it in each engine's strict `optionsSchema` would copy four fields six times; putting it *inside* `optionsJson` would change the shape every existing options test and Postman assertion reads. **Null ≠ `{}`**: a table that never expressed a preference follows the defaults *as they move*, one that did keeps what its host chose |
+| **★ The two timers both run, and the first to fire wins** | turn deadline + disconnect grace | 04 §5.2 insists they stay distinct and does not say which wins. Grace (15 s on `fixture`) is shorter than the turn limit (30 s), so a dropped player is normally recorded as `EJECTED_ABANDON` — the truthful reason, and 10 §5.1 pays it differently from `EJECTED_TIMEOUT`. `eject()` is idempotent precisely so the loser of that race is a free no-op |
+| **★ `TurnObserver` is a port, and `broadcastState` awaits it** | `application/ports/turns.ts` | The dependency genuinely runs both ways — the timer applies a timed-out default action *through* `applyMove` — so a direct reference would be a cycle, and the wrong one: "eject the player" would live inside the file that owns the event log. One line at the end of `broadcastState` covers the deal, a human move, a timeout and a bot move, so there is no second place to remember to re-arm. **Awaiting was a bug fix, not tidiness**: fire-and-forget put the timer's `PHASE` append in flight while the next move opened its transaction, and the two raced for a `seq` — absorbed by the retry loop, but only after a wall of unique-constraint errors |
+| **…and the attachment order is load-bearing** | `seats` first, `turnTimers` second | `SeatEnforcementService` clears the acting seat's strike count; `TurnTimerService` reads that count for the countdown it broadcasts. Run concurrently, the ring would sometimes show the strike the player just cleared — a cosmetic bug in the one place a player is most likely to be looking, and an unreproducible one |
+| **★ The deadline is written as a `PHASE` event *and* mirrored to Redis** | 04 §6.1, literally | The event is the record and Redis is the convenience, in that order — `REDIS_URL` is unset in development, and a deadline that lived only in Redis would silently stop surviving restarts on exactly the machine where nobody would notice. **It costs one row per turn**: the log is now roughly twice as long as the move count, snapshots land twice as often, and `game-rebuild.test.ts`'s boundaries moved from 25/50/75 to 50/100/150. That is the price of a deadline a deploy cannot reset, and it is paid knowingly |
+| **A timer row is skipped by replay *and* by narration** | `isTimerEvent`, in the port | Replay already ignored it (no `move` in the payload, so `isInputEvent` is false). Narration had to be taught: a reconnecting client would otherwise see one "phase changed" line per turn of the whole match in its move log. The live deadline reaches it instead from `announceToSocket`, called by the `game:requestSync` handler — a *stale* deadline would be worse than none, since the client would count down to an instant already passed |
+| **★ Ten narrated kinds over six stored ones** | `narrationKindOf` | 03 §4 fixes `GameEvent.kind` at six values; 04 §5.2/§6.2 narrate `TURN_TIMEOUT`, `BOT_TOOK_OVER`, `PLAYER_RETURNED`, `SEAT_ABANDONED`. Both are right and they describe different things: a timeout is *stored* as `TIMEOUT` so `isInputEvent` replays the default action it applied, and *narrated* as `TURN_TIMEOUT` so a client can render "Sara timed out — strike 1 of 2". The mapping is one function, derived from the row, never guessed at by the client |
+| **★ Timeouts and bots move through `applyMove`, never around it** | `applySystemMove` | It is what gets them the idempotency key, the `AUDIT` trail, the snapshot policy, the per-viewer broadcast and replay, for free. A quieter second write path for automated moves is how a bot's card ends up missing from a replay eighteen months from now. Keys are server-generated and seq-derived (`timeout:{gameId}:{seq}`, `bot:{gameId}:{seq}`), so two expiries racing one deadline cannot play a seat twice |
+| **…and a bot's move records no actor, while a timeout's does** | `anonymous: true` for bots only | The default action **is** the seat's move, applied on their behalf, and the log should read "seat 1 passed, by timeout". A bot's move is not theirs, and attributing it would make the match history claim they played it |
+| **A bot-held seat is never given a deadline** | the `isBot || botSubstituted` check in `arm` | Not an optimisation — a correctness rule. A turn timer decides whether a *human* has abandoned the table; pointing one at a bot would strike and "eject" a seat that is already ejected, while the ejected human's strike count climbed with them nowhere near it |
+| **"Ejected twice → the seat is final" is counted from the log** | `countEjections`, not a column | The question is about *this match*, and a column would need resetting per game or would follow the player between tables. The log is also the one record that cannot be rewritten — which is the same reason `seatOutcomeOf` reads it to find a `PLAYER_RETURNED` that a cleared member row no longer shows |
+| **`seatOutcomeOf` + `integrityFactorOf` shipped now, consumed at S36** | `application/mappers/outcomes.ts` | `GameEngine.result()` reports `COMPLETED` for every seat on purpose (ejection is not the engine's business), so somebody has to overwrite it before settlement. Pure functions taking everything as arguments, so every combination is a unit test with no database. **`REPLACED_RETURNED` deliberately beats the ejection still in the log** — otherwise returning would be worth exactly as much as staying away |
+| **A deferred (`HAND_BOUNDARY`) reclaim is held in process** | Poker and Blackjack; `fixture` is `IMMEDIATE` | The *right* to reclaim is durable (`reclaimableUntil` is a column); only the queued intent is lost on a restart, and the player re-sends one event while still inside their window. Persisting the intent would mean a second source of truth about who holds a seat, which is a far worse thing to get wrong |
+| **A deadline that expired during downtime fires immediately on boot** | `resume()` schedules it at zero delay | "No free time" cuts both ways. A grace period on boot is a free extra turn for whoever happened to be idling during a restart, and the other three players paid for the outage already |
+| **`reconcileActive()` runs before `resume()`** | `main.ts`, after `listen` | A finished game must not have a deadline armed against it. The ordinary path cannot produce a terminal-but-`ACTIVE` row (the finish commits in the move's own transaction) — a restored backup or an older build can, and this turns "that table is stuck forever" into a log line |
+| **`Date.now()` and `new Date()` joined `Math.random()` in the domain ban** | ESLint guard 2 | Randomness was banned at S01 and time was not, leaving half of invariant I1 enforced. Phase H is exactly when that gap would be filled by accident — the tempting shortcut is an engine checking how long somebody has been thinking, which would make `(seed, moves[])` stop reproducing a match. `new Date()` is banned for I5 as well: a `Date` in engine state does not round-trip through JSON |
+| **The seat-room allowlist grew from one file to three** | `projection-boundary.test.ts` | `game:ejectionWarning` (04 §6.2) and `game:rewardPreview` (04 §6.6) are seat-private by specification. The list is spelled out with a reason per entry rather than pattern-matched, so extending it stays a decision somebody makes in a diff — and a second assertion checks neither new file can emit `game:state` |
+| **Helpers left `contracts/`; the schema stayed** | `application/policies/turnEnforcement.ts` | `contracts/` declares and never executes (`contracts-purity.test.ts` bans function declarations outright), so `withTurnEnforcementDefaults` and `reclaimDeadline` moved out. `DEFAULT_TURN_ENFORCEMENT` is a hand-written literal rather than `Schema.parse({})` for the same reason, with a test pinning the two together |
+| **`waitFor` added to the test kit** | `tests/helpers/game.ts` | `FakeClock.advance` runs its callbacks synchronously, but an expiry then starts a *detached* chain of real database awaits. Asserting straight after `advance` reads the state from before the strike, and the failure reads as a broken feature rather than an early assertion. Polls on **real** time, deliberately: the fake clock is the game's, and waiting for I/O on it would deadlock |
+| **…and every Phase H test file disarms timers in `beforeEach`** | `turnTimers.stop()`, `seats.stop()` | The container is built once per file, so a deadline armed by the previous test is still in the map — and `clock.advance` fires *every* due timer. Without it the warning-privacy assertion sees five warnings for four dead games and reads as a broadcast leak |
+| **Eight Phase H counters added** | incl. `turn_warnings_sent` | Against `turn_timeouts` it measures whether the warning works at all: one that almost never converts into a timeout is doing its job. `ejections` (declared since Phase C, finally incremented) against `seats_reclaimed` is 04 §6.4's incentive design measured directly |
+
 ## Decisions made while building Phase G (2026-09-12)
 
 | Decision | Value | Why |
@@ -830,7 +942,7 @@ hook (S178), `contracts:sync`/`check`, the test global setup and the seed test a
 | Question | Needed by | Documented default | Status |
 |---|---|---|---|
 | `db push` vs dual migration folders for dev (`03` §8) | S04 | `db push` for dev, real migrations for Postgres only | **Resolved by building it that way.** `db:push` for dev/test; `prisma/migrations/` stays Postgres-only and is generated in S46 |
-| `ejectAfterStrikes`: 2 (spec default) or 1 (Mehrang's literal rule) (`04` §6.3) | **S32** | 2, as a table option — set to 1 for the strict rule | Open |
+| `ejectAfterStrikes`: 2 (spec default) or 1 (Mehrang's literal rule) (`04` §6.3) | **S32** | 2, as a table option — set to 1 for the strict rule | **Resolved 2026-09-12 (Mehrang): 2.** Shipped as the default, with `ejectAfterStrikes: 1` available per table and tested both ways |
 | Should coins be purchasable for real money? (`10` §6.5) | M7 | No — coins earn-only, money buys the subscription | Open |
 | Shelem: match target, all-pass rule, point-card discards (`games/shelem.md` §0.4) | M4-S01 | Unsourced; a real match will settle them | Open |
 | Reward rates, prices, caps, multipliers (`10` §3–4) | S06 seeds them | A starting guess; all live in `RewardRule` rows | **Seeded.** `sudoku` `expectedMinMs` (2 min) is the one number with no source in `10` — invented, worth a look |
@@ -841,6 +953,43 @@ hook (S178), `contracts:sync`/`check`, the test global setup and the seed test a
 | Alerting channel for `SecurityEvent` and ledger drift (`12` §12) | MA | None in v1 — console only | Open |
 
 ## Notes for next session
+
+### Phase H left these for S35–S38 to build on
+
+- **★ `seatOutcomeOf(member, events)` and `integrityFactorOf(outcome)` are what S36
+  wants** (`application/mappers/outcomes.ts`). Both are pure. Call them **inside**
+  the settlement transaction and write the result to `MatchParticipant.outcome` —
+  do not re-derive the outcome later, because a reclaim clears the member row and
+  by then it looks like somebody who never left. `integrityFactorOf` is the
+  `integrityFactor` S35's formula multiplies by: 0 for an ejected seat (**even
+  when their team wins** — eligibility is per seat), 0.5 for a returned one, 1
+  otherwise.
+- **`MatchResult` is still never written.** Unchanged from Phase G: `applyMove`
+  finishes the instance, reveals the seed and broadcasts `game:finished`. S36 is
+  where the settlement transaction hangs off that finish path.
+- **`game:rewardPreview` already exists and currently sends zeroes.** It is sent
+  to an ejected seat at the moment of ejection (04 §6.6). S35 should fill in a
+  real `estimatedCoins`; the payload shape and the seat-private addressing are
+  done, and `reasonKey` already distinguishes timeout from abandon.
+- **Timers and bots both observe `container.turns`.** To react to a state change,
+  attach a `TurnObserver` in `container.ts` rather than calling from
+  `GameSessionService` — and remember the list is run **in order**, so anything
+  that writes state another observer reads must be attached first.
+- **`container.turnTimers.resume()` and `container.games.reconcileActive()` are
+  boot tasks**, wired in `main.ts` after `listen`. S38's nightly job (ledger
+  reconciliation + `pruneSnapshots`) is a different shape — scheduled, not
+  one-shot — but it belongs beside them.
+- **The log is now ~2× the move count.** One deadline row per turn. Anything that
+  counts events, walks a log, or asserts on a `seq` should filter with
+  `isTimerEvent(payload)` from `application/ports/turns.js` — `moveRows()` in
+  `tests/integration/event-log.test.ts` is the pattern to copy.
+- **`tests/helpers/game.ts` grew `waitFor` and `seatMember`**, and `seatTable`
+  takes a `turnEnforcement` override. Any test that advances the fake clock must
+  call `container.turnTimers.stop()` and `container.seats.stop()` in `beforeEach`
+  or it will fire other tests' deadlines.
+- **`scripts/dev-socket.ts` grew `reclaim` and `idle`**, and prints the turn clock
+  as a countdown computed from `endsAt − serverTime` — the same arithmetic the
+  browser does at S44.
 
 ### Phase G left these for S31–S34 to build on
 
@@ -1073,7 +1222,14 @@ Five things about the collection worth remembering:
   by `backend/requests/socket.md` and by 60 socket tests instead.
 - **Phase G added no REST routes either**, for the same reason: a move is socket traffic by the
   transport rule, and `02` §5 lists no REST game routes. Re-run against Phase G, again **71
-  requests, 99 assertions, 0 failures**. The next session that *will* touch the collection is
-  **S37** (`GET /wallet`, `/wallet/transactions`) — and it should delete `GET /_probe/wallet` and
-  the `/_probe/tables/:id/seats*` routes in the same commit, saying out loud what coverage goes with
+  requests, 99 assertions, 0 failures**.
+- **Phase H added no routes but did change the table contract.** `turnEnforcement` is now accepted
+  by `POST /tables` and `PATCH /tables/:id` and returned, resolved, by every table response — so
+  folder 03 grew two requests (the strict rule as a table option, and an out-of-range refusal) and
+  three assertions elsewhere. **73 requests, 104 assertions, 0 failures** as of 2026-09-12. Note
+  this spends no extra `auth:create` budget: both new requests are table creations by the host who
+  is already logged in.
+- The next session that *will* touch the collection again is **S37** (`GET /wallet`,
+  `/wallet/transactions`) — and it should delete `GET /_probe/wallet` and the
+  `/_probe/tables/:id/seats*` routes in the same commit, saying out loud what coverage goes with
   them (see folder 07's note above).

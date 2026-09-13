@@ -54,6 +54,7 @@ export class InMemoryTableRepository implements ITableRepository {
       rewardEligible: true,
       allowSpectators: true,
       requireApproval: false,
+      turnEnforcement: null,
       startedAt: null,
       closedAt: null,
       ...data,

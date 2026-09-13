@@ -18,6 +18,7 @@ export type NewTable = Draft<
   | 'rewardEligible'
   | 'allowSpectators'
   | 'requireApproval'
+  | 'turnEnforcement'
   | 'startedAt'
   | 'closedAt'
 >

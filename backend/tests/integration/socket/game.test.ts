@@ -9,6 +9,7 @@ import type {
 } from '../../../src/contracts/events.js'
 import type { FixtureView } from '../../../src/domain/games/_fixture/engine.js'
 import { commitSeed } from '../../../src/domain/games/shared/rng.js'
+import { isTimerEvent } from '../../../src/application/ports/turns.js'
 import { resetDb } from '../../helpers/db.js'
 import {
   settle,
@@ -223,18 +224,19 @@ describe('game:move', () => {
     })
 
     expect(ack.ok).toBe(true)
-    if (ack.ok) expect(ack.data).toMatchObject({ seq: 1, replayed: false })
+    // Seq 2: the deal armed seat 0's deadline at seq 1 (Phase H, 04 §6.1).
+    if (ack.ok) expect(ack.data).toMatchObject({ seq: 2, replayed: false })
 
     // Public narration goes to the table room, as an i18n key and never prose.
     const narration = await b.next<{ seq: number; descriptor: { key: string } }>('game:event')
-    expect(narration.seq).toBe(1)
+    expect(narration.seq).toBe(2)
     expect(narration.descriptor.key).toBe('games.fixture.move.press')
     expect(narration.descriptor.key).not.toMatch(/\s/)
 
     // And both seats get a fresh, individually projected state.
     const stateA = await a.next<GameStatePayload>('game:state')
     const stateB = await b.next<GameStatePayload>('game:state')
-    expect(stateA.seq).toBe(1)
+    expect(stateA.seq).toBe(2)
     expect(stateA.toAct).toBe(1)
     expect((stateB.view as FixtureView).counts).toEqual({ '0': 1, '1': 0 })
 
@@ -292,10 +294,14 @@ describe('game:move', () => {
      * (03 §4.2), so "what did this player try, and when" reads off one log in
      * one order. It cost a seq; it did not cost a turn.
      */
-    expect(state.seq).toBe(2)
+    expect(state.seq).toBe(3)
     expect((state.view as FixtureView).counts).toEqual({ '0': 1, '1': 0 })
 
-    const rows = await harness.container.repos.events.listByGame(gameId)
+    // Deadlines filtered out: this assertion is about what a *refused* move
+    // leaves in the stream, and it still sits before the move that followed it.
+    const rows = (await harness.container.repos.events.listByGame(gameId)).filter(
+      (row) => !isTimerEvent(row.payload),
+    )
     expect(rows.map((row) => row.kind)).toEqual(['AUDIT', 'MOVE'])
 
     a.close()
@@ -410,11 +416,15 @@ describe('game:requestSync over the socket', () => {
     await settle()
     b.clear()
 
+    // Two presses → five rows: the deal's deadline, then a move and a deadline
+    // each. Catching up from seq 1 replays 2..5.
     const ack = await b.emit<GameSyncResult>('game:requestSync', { gameId, lastSeq: 1 })
-    expect(ack.ok && ack.data).toMatchObject({ mode: 'delta', fromSeq: 2, toSeq: 2 })
+    expect(ack.ok && ack.data).toMatchObject({ mode: 'delta', fromSeq: 2, toSeq: 5 })
 
     await settle()
-    expect(b.of('game:event')).toHaveLength(1)
+    // ★ Two narrated events, not four: the deadlines are skipped, or a
+    // reconnecting client's move log would carry one phase change per turn.
+    expect(b.of('game:event')).toHaveLength(2)
     expect(b.of('game:state')).toHaveLength(1)
 
     a.close()

@@ -114,10 +114,10 @@ where the projections visibly differ._
 
 ### Phase H — Turn enforcement
 
-- [ ] S31 `TurnTimerService` — absolute deadlines, `game:turnTimer`
-- [ ] S32 Warning, strike ladder, default action, `strikesResetOnAction`
-- [ ] S33 Ejection + bot substitution
-- [ ] S34 Seat reclamation + timer re-arming on restart
+- [✅] S31 `TurnTimerService` — absolute deadlines, `game:turnTimer`
+- [✅] S32 Warning, strike ladder, default action, `strikesResetOnAction`
+- [✅] S33 Ejection + bot substitution
+- [✅] S34 Seat reclamation + timer re-arming on restart
 
 ### Phase I — Rewards
 
