@@ -121,10 +121,13 @@ where the projections visibly differ._
 
 ### Phase I — Rewards
 
-- [ ] S35 `RewardService.compute` — the pure policy function
-- [ ] S36 ⭐ Settlement transaction — per-seat, idempotent, forfeiture
-- [ ] S37 `GET /wallet`, `/wallet/transactions`, `wallet:updated`
-- [ ] S38 Debit path with row lock, `GUEST_FORFEIT`, nightly reconciliation
+_Built and green. Awaiting Mehrang's "You verify" pass — see `context.md` for the commands, and
+in particular the one that needs doing by hand: corrupt a balance and watch the job catch it._
+
+- [✅] S35 `RewardService.compute` — the pure policy function
+- [✅] S36 ⭐ Settlement transaction — per-seat, idempotent, forfeiture
+- [✅] S37 `GET /wallet`, `/wallet/transactions`, `/rewards/rules`, `wallet:updated`
+- [✅] S38 Debit path with row lock, `GUEST_FORFEIT`, reconciliation, `ADMIN_ADJUST`
 
 ### Phase J — Frontend
 

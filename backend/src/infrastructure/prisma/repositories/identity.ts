@@ -147,6 +147,15 @@ export class PrismaGuestSessionRepository
     return count === 0 ? null : this.findById(id)
   }
 
+  async listExpiredUnclaimed(now: Date, limit: number): Promise<GuestSession[]> {
+    const rows = await this.db.guestSession.findMany({
+      where: { expiresAt: { lte: now }, claimedAt: null },
+      orderBy: { expiresAt: 'asc' },
+      take: limit,
+    })
+    return rows.map(toGuestSession)
+  }
+
   async deleteExpired(now: Date): Promise<number> {
     const { count } = await this.db.guestSession.deleteMany({ where: { expiresAt: { lte: now } } })
     return count

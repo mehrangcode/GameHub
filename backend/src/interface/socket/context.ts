@@ -1,7 +1,7 @@
 import type { Logger } from 'pino'
 import type { Socket } from 'socket.io'
 import { toMemberViews } from '../../application/mappers/tables.js'
-import { seatRoom, spectatorRoom, tableRoom, userRoom } from '../../application/ports/realtime.js'
+import { holderRoom, seatRoom, spectatorRoom, tableRoom } from '../../application/ports/realtime.js'
 import type { Container } from '../../container.js'
 import type { Identity } from '../../contracts/dto/auth.js'
 import type { MemberView } from '../../contracts/dto/tables.js'
@@ -140,7 +140,10 @@ export async function syncRooms(
     wanted.add(spectatorRoom(table.id))
   }
 
-  if (context.ref.kind === 'user') wanted.add(userRoom(context.ref.userId))
+  // ★ Both kinds, since S37: a guest's provisional balance is the signup pitch
+  // and has to be able to arrive live. `holderRoom` is the holder key, so this
+  // is the same room `wallet:updated` is addressed to (10 §3.4, §10).
+  wanted.add(holderRoom(context.ref))
 
   // Leave only rooms belonging to *this* table, named exactly. A tab watching
   // two tables must not be evicted from the other one, and `user:{id}` is not

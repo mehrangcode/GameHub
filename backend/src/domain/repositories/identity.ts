@@ -78,6 +78,19 @@ export interface IGuestSessionRepository extends IRepository<GuestSession> {
    * session", since both mean the same thing to it.
    */
   claimIfUnclaimed(id: string, userId: string, at: Date): Promise<GuestSession | null>
+
+  /**
+   * Sessions past `expiresAt` that nobody ever claimed — S38's forfeiture job.
+   *
+   * Claimed sessions are excluded because their coins already vested (10 §3.4)
+   * and their wallet is already empty; forfeiting one would be a second debit
+   * of money that has moved.
+   *
+   * Paged, and ordered oldest-first, so a platform that has not run the job for
+   * a month works through the backlog in a bounded number of passes instead of
+   * loading every dead session ever created.
+   */
+  listExpiredUnclaimed(now: Date, limit: number): Promise<GuestSession[]>
   deleteExpired(now: Date): Promise<number>
 }
 

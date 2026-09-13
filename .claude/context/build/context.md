@@ -1,23 +1,148 @@
 # Live Context — read this first, every session
 
-**Last updated:** 2026-09-12
+**Last updated:** 2026-09-13
 
 ## Where we are
 
 | | |
 |---|---|
 | **Milestone** | M0 — Platform Skeleton |
-| **Last session completed** | **S01–S34 (Phases A + B + C + D + E + F + G + H) built and green — not yet verified by Mehrang** |
-| **Next session** | **S35 — `RewardService.compute`, the pure policy function** (2.5 h, 🧪) — starts Phase I |
+| **Last session completed** | **S01–S38 (Phases A + B + C + D + E + F + G + H + I) built and green — not yet verified by Mehrang** |
+| **Next session** | **S39 — Axios, single-flight refresh, `authStore`, login/register** (3 h, 🖱️) — starts Phase J, the frontend |
 | **Blocked on** | Nothing in code. The two older environment items only (port 3000, Playwright deps) |
-| **Repo state** | `backend/` and `frontend/` exist. **1503 backend tests**, 18 frontend tests. No `admin-frontend/` (MA) |
+| **Repo state** | `backend/` and `frontend/` exist. **1657 backend tests**, 18 frontend tests. No `admin-frontend/` (MA) |
 
-Session spec for S35: `Documents/11-build-plan.md` §11.
+Session spec for S39: `Documents/11-build-plan.md` §12.
 
-**M0's headline exit criterion is now demonstrable**: *an idle player is warned,
-struck twice, ejected, replaced by a bot, and the table plays on to a finish.*
-`tests/integration/ejection.test.ts` walks exactly that sentence, and
-`requests/socket.md`'s Phase H section walks it by hand in two terminals.
+**Both of M0's headline exit criteria now run.**
+
+*An idle player is warned, struck twice, ejected, replaced by a bot, and the table
+plays on to a finish* — `tests/integration/ejection.test.ts` walks that sentence,
+and `requests/socket.md`'s Phase H section walks it by hand in two terminals.
+
+*An ejected player on a winning team earns 0; their partner earns in full* —
+`tests/integration/reward-settlement.test.ts` walks that one, and its last block
+runs the whole real pipeline: nobody in that test calls `settle`, the move
+pipeline does it.
+
+*A corrupted balance is detectable* — `scripts/dev-corrupt-balance.ts` breaks
+invariant E1 on purpose and `scripts/dev-reconcile.ts` catches it. **This one is
+worth doing by hand**; it is two commands and it is the whole economy's
+foundation.
+
+## Phase I — what to verify (the gate for S35–S38)
+
+```bash
+cd backend
+npm run typecheck && npm run lint && npm test          # 1657 tests
+```
+
+**The names to read, in order of what they protect:**
+
+| Test | What breaks without it |
+|---|---|
+| `★★ seat 1 is ejected on the WINNING team — 0 coins, forfeited; seat 3 gets the full amount` | **The M0 reward criterion.** Asserted from *both* ends on purpose: a settlement that paid nobody would satisfy the zero alone, and a broken reward path looks identical to a correctly-applied penalty from the punished seat |
+| `★★ a hand-corrupted balance is caught, reported, and ALERTed` | E1 stops being a measurement and goes back to being a claim |
+| `★ …and does NOT repair it — a silent self-heal erases the evidence` | The job "fixes" the symptom and the write path that lied is never found |
+| `★★ two concurrent debits, one item's worth of coins ⇒ exactly one succeeds` | The real double-spend. A read-then-write without the row lock passes every other test in the file |
+| `★★ EJECTED_TIMEOUT earns 0 at RANK 1 — the exit criterion, in one line` | The rule becomes conditional on rank, which is the one case it exists for |
+| `★ the forfeit is RECORDED, never silent — a CAP_REJECTED row saying why` | "Why did I get no coins?" is unanswerable, and a player who cannot see why assumes a bug — correctly, because a bug looks the same |
+| `★ settling twice credits NOTHING twice, and writes no second set of rows` | A retried finish pays the table twice |
+| `★ a throw mid-loop rolls the WHOLE match back — no result, no partial credits` | A half-paid match, which has no correct repair |
+| `★ a bot seat produces a participant row and NO wallet transaction of any kind` | A ledger row that belongs to nobody, which the reconciliation job then has to reason about |
+| `★ a guest is refused: a statement is an account feature` / `★ a guest cannot spend` | Farmed provisional coins become convertible before signup, and the vesting cap bounds nothing |
+| `★ §3.5 — the same four people meeting a third time inside 30 minutes decay to 0.6×` | The farming guard is a constant in a document rather than a query |
+| `★ E3 — the breakdown exposes no gameplay field for premium to buy` | Premium starts drifting toward pay-to-win one convenient field at a time |
+| `★ a second result for the same game THROWS` | The match-level half of idempotency, which the per-seat key cannot provide |
+
+```bash
+# S35 — the formula, checked against 10 §3.2–3.6 row for row. No database at all.
+npx vitest run tests/unit/rewards/compute.test.ts --reporter=verbose
+
+# S36 — ⭐ the exit criterion, idempotency, rollback, bots, guests, decay, premium.
+npx vitest run tests/integration/reward-settlement.test.ts --reporter=verbose
+
+# S37 — the three access levels, and the CAP_REJECTED row that stays visible.
+npx vitest run tests/integration/wallet/reads.test.ts --reporter=verbose
+
+# S38 — the double-spend race and the corrupted balance.
+npx vitest run tests/integration/wallet-debit.test.ts tests/integration/reconciliation.test.ts \
+  --reporter=verbose
+
+# And the two new repositories, against the fakes AND SQLite (every name twice).
+npx vitest run tests/unit/repositories/contract/matches.test.ts --reporter=verbose
+```
+
+### Live — the one that is worth doing by hand
+
+```bash
+cd backend
+npm run db:reset          # re-seeds the RewardRule rows the whole economy reads
+PORT=3999 npm run dev
+
+API=localhost:3999/api/v1
+
+# 1. the rate card, with no cookie at all. THIS IS DELIBERATE (10 §11).
+curl -s $API/rewards/rules | jq '{premiumMultiplier, caps, integrityFactors}'
+curl -s $API/rewards/rules | jq '.rules[] | {id, base}'
+#   ★ Shelem 80 is the best rate in the list. That is product design, not an
+#     accident: it asks for 45 minutes and three other people.
+#   ★ integrityFactors.EJECTED_TIMEOUT is 0 — forfeiture is a PUBLISHED rule
+#     somebody could have read beforehand, not a surprise after the fact.
+
+# 2. a wallet, and a statement
+curl -sc /tmp/c.txt -X POST $API/auth/register -H 'content-type: application/json' \
+  -d '{"email":"me@test.dev","password":"correct-horse-battery","displayName":"Mehrang"}' >/dev/null
+curl -sb /tmp/c.txt $API/wallet | jq
+#   → three wallets, all VESTED. `/_probe/wallet` is GONE — this is the real route.
+
+npx tsx scripts/dev-credit.ts --email me@test.dev --amount 500
+curl -sb /tmp/c.txt 'localhost:3999/api/v1/wallet/transactions?limit=10' \
+  | jq '.items[] | {kind, amount, balanceAfter, reason}'
+#   ★ `reason` is a machine code, never an English sentence. A Persian reader
+#     renders the statement without a round-trip through the server.
+
+curl -s -b /tmp/c.txt "$API/wallet/transactions?holder=somebody-else" | jq .code
+#   → VALIDATION_FAILED. There is no field with which to ask for another
+#     person's statement, and supplying one is refused rather than ignored.
+
+# 3. ★★ THE ONE TO ACTUALLY DO: break E1 and watch it be caught.
+npx tsx scripts/dev-corrupt-balance.ts --email me@test.dev --set 999999
+npx tsx scripts/dev-reconcile.ts
+#   → ALERT: wallet <id> cached 999999, computed 500, drift +999499
+#   → exit code 1, so a cron entry can page on it directly
+
+npm run db:studio
+#   SecurityEvent: a LEDGER_DRIFT row, severity ALERT, with both numbers in
+#   detailsJson.
+#   ★★ AND THE THING TO LOOK HARDEST AT: Wallet.balance is STILL 999999.
+#      The job did not repair it, deliberately. "What is the balance" was never
+#      the interesting question — the ledger always answered that. "Which write
+#      path produced 999999" is, and a silent self-heal would have erased it.
+
+npx tsx scripts/dev-corrupt-balance.ts --email me@test.dev --repair
+npx tsx scripts/dev-reconcile.ts          # → clean, exit 0
+```
+
+**And the forfeiture, end to end, if you want to see coins not arrive:** run the
+Phase H walk in `requests/socket.md` (go idle on seat 1, get ejected, let the bot
+finish the match), then in Studio:
+
+```
+MatchParticipant     seat 1 → coinsAwarded 0, rewardForfeited true, outcome EJECTED_TIMEOUT
+                     the other seat → the full amount
+WalletTransaction    the ejected seat holds ONE row: CAP_REJECTED, amount 0,
+                     reason 'EJECTED_TIMEOUT', refKind 'match'
+```
+
+That zero-amount row is the point. A reward silently not granted is
+indistinguishable from a bug; a row with a reason makes "why did I get nothing?"
+answerable from the ledger alone.
+
+**Or in Postman:** folder `08 Rewards & the wallet (S35–S38)` covers the REST
+surface with assertions attached. The collection is now **81 requests** across
+eleven folders — folders `08` and `09` were renumbered to `09` and `10` to make
+room, and folder 07's two `/_probe/wallet` calls now hit the real `GET /wallet`.
 
 ## Phase H — what to verify (the gate for S31–S34)
 
@@ -382,8 +507,9 @@ npm run db:studio
 ```
 
 **Or in Postman:** folder `07 Wallet & the claim` runs the same journey with assertions attached,
-including the `memberId`/`joinedAt` comparison. 71 requests, 99 assertions, 0 failures expected —
-see the note at the bottom of this file about its **new tightest budget** (`auth:create`, 8 of 10).
+including the `memberId`/`joinedAt` comparison. 82 requests, 120 assertions, 0 failures expected —
+see the note at the bottom of this file about its **budget**, which Phase I made tight in two
+places at once (`auth:create` at 9 of 10, and 82 requests against a 100/min global limit).
 
 ## Phase D — what to verify (the gate for S17–S20)
 
@@ -699,6 +825,40 @@ What *is* fixed: nothing in the repo depends on `node_modules/.bin` shims any mo
 hook (S178), `contracts:sync`/`check`, the test global setup and the seed test all spawn
 `node <resolved cli.js>` — see `tests/bin.ts`. So the failure you get from Windows is now an honest
 "missing Prisma engine for this platform" rather than a misleading `ENOENT` on `npx`.
+
+## Decisions made while building Phase I (2026-09-13)
+
+| Decision | Value | Why |
+|---|---|---|
+| **★ `integrityFactorOf('RESIGNED')` corrected from 1 to 0.25** | `application/mappers/outcomes.ts` | A defect from S33, caught at S35 when the function got its first consumer. 10 §5.2 rule 2 is explicit: *"resigning pays a little, being ejected pays nothing"* — conceding a lost position promptly gives the other three their evening back, and the gap between 0.25 and 0 is exactly how much that courtesy is worth. `KICKED` stays at **1**, against 10 §5.1's own table, because CLAUDE.md's hard rule wins: a platform-initiated removal forfeits nothing (12 A8) |
+| **★ `RewardService.compute` is `static` and takes a plain record** | no clock, no repositories, no instance state | `11` S35 asks for a pure function; making it static is what makes the purity *checkable* rather than asserted. `tests/unit/rewards/compute.test.ts` has no database, no container and no `beforeEach` — which is also the proof that reward policy lives outside the engines (10 §5.3) and therefore that invariant I1 still holds. The three lookups the formula needs (`ruleFor`, `premiumMultiplierFor`, `repeatIndexFor`) are instance methods, deliberately kept out of it |
+| **★ A reward of zero always carries a reason, and the reason is written down twice** | machine code on the ledger, i18n key on the socket | 10 §5.2 rule 6 spells the forfeiture row out as `reason: 'EJECTED_TIMEOUT'` and that is the right shape for the ledger — it is read by operators, by the admin console and by the reconciliation job, none of which should reverse a translation key. The i18n key (`games.reward.forfeitedTimeout`) travels on `game:rewardSettled` instead, where a human is reading it. Two audiences, two vocabularies, one decision |
+| **★ `forfeited` is only true when there was something to lose** | `integrity === 0 && cleanAmount > 0` | `MatchParticipant.rewardForfeited` means *"the match paid, and this seat alone was zeroed"*. A seat that would have earned 0 anyway — an ineligible table, a 30-second match — has not been punished, and marking it forfeited would make the post-match screen accuse the platform of a penalty it never applied |
+| **★ §3.5's matchup signature is identities only, never the game** | `sha256(sorted(human holder keys))` | 10 §3.5 says "the same set of identities", and reading it literally is also the only reading that cannot be gamed: keying by game would hand a farmer a bypass so cheap it is an accident waiting to happen — alternate two games and every match pays 1.0× forever. Honest play never reaches the tail either way, because four people cannot finish three real Shelem matches in half an hour. **Mehrang chose this explicitly** over the per-game alternative |
+| **…and the lookup is scoped to one player, so it needs no signature column** | `listRecentHolderSetsFor(holder, since)` | Asking "which matches did *this person* finish in the last 30 minutes" returns a handful of rows on any platform; asking "which matches finished platform-wide" would have needed a column, an index, and a query that grows with the whole user base to answer a question about four people |
+| **★ Premium is read for real at M0, and that is not payment code** | `ISubscriptionRepository`, read-only | `11` says no payment code before M7 and that still holds: no Stripe, no webhook, no checkout, no provider SDK. A `Subscription` row is, from here, one column saying whether the perks are live. It also finally consumes `CreditInput.capMultiplier`, declared unused at S21 — §3.7's "premium raises the caps by its multiplier, never removes them" would otherwise have stayed a comment |
+| **`findActive` checks `currentPeriodEnd`, and honours `PAST_DUE` inside grace** | 10 §6.3 | Two departures from `status === 'ACTIVE'`, both deliberate: a row left `ACTIVE` by a webhook that never arrived would pay 1.5× forever, and taking somebody's earn rate away the hour their card expired punishes an administrative failure as if it were a lapse |
+| **★ Settlement runs AFTER the move's transaction commits, in its own** | `GameSessionService.settle`, errors swallowed | Both directions matter. A failed wallet write must not un-play the last card — the log is the truth (P4), and a game that finished, finished. And a failed settlement must not turn a played card into a 500. The error is logged, `MatchResult` does not exist, so `reconcileActive()` picks the game up at the next boot and `settle` is idempotent besides. *Within* settlement a partially-paid match is still impossible, which is the property `11` S36 actually asks for |
+| **★ Idempotency at two levels, doing different jobs** | `MatchResult.gameId` unique + `match:{id}:{seat}` | The seat key alone would let a replay write duplicate participants and stats while paying once; the match check alone is a read that two concurrent finishes can both pass. Between them a settlement can be attempted any number of times and land exactly once |
+| **The preview is computed outside the transaction, then handed to it** | plan → `game:rewardPreview` → `uow.run(plan)` | 10 §11's ordering: a player sees the arithmetic *before* the number moves, so a forfeit reads as a rule rather than as a wallet that failed to change. Computing it twice would risk two answers; computing it inside the transaction would mean announcing after the fact |
+| **★ A bot gets a `MatchParticipant` row and no ledger row at all** | not even a zero-amount one | 10 §12 case 9. A bot has no wallet to credit and nobody to explain a zero to; a `CAP_REJECTED` row for a bot would put money-shaped evidence in the ledger belonging to nobody, which the reconciliation job then has to reason about forever |
+| **`Rating` and `RatingChange` stay empty; `PlayerStats` is written** | deferred to M1+ | ELO for a four-handed partnership game is a real design question — per seat or per team, against what expected score — and M0's only engine is `_fixture`. Designing the rating model against a test rig and redesigning it at M4 against Shelem is worse than not having one. **Mehrang's call.** `played`/`won`/`lost`/`drawn`/`forfeited`/streaks are unambiguous and land now |
+| **A guest gets no `PlayerStats` row** | the model is keyed by `userId` | Inventing a guest-shaped stats table would be building the other half of an account for somebody who has not made one. Their history arrives with them at signup instead, through the claim's re-attribution of `MatchParticipant` (03 §6.1 step 7) — the same data, counted when it becomes permanent |
+| **★ `holderRoom` joins the four room builders, and it *is* the holder key** | `user:{id}` / `guest:{id}` | `wallet:updated` has to reach a guest: they accrue coins (10 §3.4) and are entitled to watch them arrive. A notification path that worked only for accounts is how the guest experience quietly rots. Reusing `holderKey` means the room name and the wallet's owner are the same string by construction, not by convention |
+| **`wallet:updated` is announced after the transaction, and its failure is swallowed** | `WalletService.announce` | A client told its balance rose by a write that then rolled back has been lied to in the one part of the product where that matters. And a notification that did not arrive is a stale screen and a refresh, whereas throwing here would turn a *successful payment* into a failed request |
+| **★ `game:rewardSettled` is seat-private** | added to the `projection-boundary` allowlist | It carries somebody's coins and, when they earned nothing, the reason. `game:finished` already told the table who won; how much each seat was paid is between the platform and that player. Fourth entry on a list that is meant to be expensive to extend |
+| **`GET /rewards/rules` publishes the integrity factors, and withholds `guestVestCap`** | `application/mappers/rewards.ts` | The integrity table is what makes "you were removed for inactivity, so you earned nothing" a rule the player could have read beforehand rather than a surprise (10 §11). `guestVestCap` is not a rate — it is the bound on what a farming run is worth, and the only thing publishing it changes is how efficiently somebody runs up to it |
+| **★ The reconciliation job reports drift and does not repair it** | `ReconciliationService` | The design decision this whole phase turns on. A self-healing job would set the column to the computed value and destroy the only evidence that a write path is broken. "What is the balance" was never the interesting question — the ledger has always answered that. "Which code path wrote a number that disagreed with the row it was supposed to accompany" is, and that is a human's question |
+| **★ No scheduler, anywhere** | two services + two scripts | `ReconciliationService.run()` and `GuestForfeitService.run()` are ordinary methods, invoked by `scripts/dev-reconcile.ts` / `dev-forfeit.ts` and by whatever the deployment already schedules. An in-process `setInterval` is simpler today and wrong the moment there are two API instances, since both would sweep the same rows and both would alert. **Mehrang's call** |
+| **`dev-reconcile.ts` exits 1 on drift** | so a cron entry can page on it | The alternative is a scheduler parsing stdout, which is how a monitoring rule stops working the first time somebody rewords a log line |
+| **`dev-corrupt-balance.ts` uses raw Prisma, and has to** | the only such write in the repository | `IWalletRepository` exposes no balance setter (the Phase B decision), so breaking E1 on purpose means reaching past the whole architecture. That is exactly the right amount of difficulty: **if this script ever becomes writable through a service, something has gone wrong upstairs**, and the comment at the top says so |
+| **`allowOverdraft` exists, and has two callers** | `ADMIN_ADJUST` clawback, `GUEST_FORFEIT` | The debit path refuses guests by design — a guest converting farmed coins before signup is the attack the provisional mechanism exists to prevent. Neither of these is that. An operator reversing an erroneous grant must be able to even if the holder already spent some of it (the balance goes negative and is *visible* as such), and expiry is the platform reclaiming a balance rather than the guest spending it. One flag, named after what it permits, at the two call sites entitled to it |
+| **`ADMIN_ADJUST` refuses without a written reason** | `ADMIN_ADJUST_REASON_MIN`, a `ValidationError` | 12 §7.2 makes `reason` a column; this makes it a rule. It is the one transaction kind with no causing event to point at, so an adjustment nobody can explain later is indistinguishable from a bug in the credit path. Enforced in the service rather than the console, because a UI is a suggestion |
+| **`LEDGER_DRIFT` added to `SECURITY_EVENT_KINDS`, default `ALERT`** | `contracts/enums.ts` | 10 §2.3 asks for an `ALERT` `SecurityEvent` and there was no kind to raise. It is awaited rather than fire-and-forget — unlike every other `record` call, which is deliberately non-blocking so an audit failure cannot fail the audited request. Here there is no request to protect and the alert *is* the product of the job |
+| **`/_probe/wallet` deleted, as dated; the seat probes kept indefinitely** | `probe.routes.ts` | S21 dated the wallet probe for S37 and S37 arrived, so it is gone — `GET /wallet` renders the same balances at the real access level. The seat routes were re-dated for S37 too and are now **undated**: the constraint keeping them is not a missing feature a later session supplies, it is that Newman speaks HTTP and the seat protocol is a socket. That will not change, so pushing the date again would have been theatre |
+| **The Postman collection grew to 82 requests, and 08/09 were renumbered** | new folder `08 Rewards & the wallet (S35–S38)` | One folder per phase, in order, which meant `08 The boundary` → `09` and `09 Teardown` → `10`. **The budget is now tight**: 82 requests against `RATE_LIMIT_MAX=100/min`, and `auth:create` is at 9 of 10. Two runs inside a minute now 429 in the teardown folder, which reads exactly like a broken collection |
+| **★ …and the new folder logs out before joining as a guest** | a correctness step, not housekeeping | Cost a failed Newman run to find. `authenticate` resolves the `access` cookie **first** — correctly, since a player who signs up mid-session *is* a user — so a jar holding both an access cookie and a guest cookie presents as the user. The guest assertions silently ran against a logged-in account: three wallets instead of one, and a 200 where the 403 belongs. Same ordering, same trap, as the one that made `POST /auth/guest/claim` read the guest cookie directly |
+| **Eleven Phase I counters added** | incl. `settlements_replayed` | That one is the match-level half of E2 working: a finish that arrived twice and paid once. It should be small and non-zero — a permanent zero probably means the idempotent path stopped being exercised, not that retries stopped happening. `rewards_forfeited` against `matches_settled` is how often the anti-AFK rule actually bites, and `reward_decay_applied` should stay near zero on a platform of friends playing long games |
 
 ## Decisions made while building Phase H (2026-09-12)
 
@@ -1155,8 +1315,8 @@ hook (S178), `contracts:sync`/`check`, the test global setup and the seed test a
 ## The Postman collection (`postman/`, added 2026-09-09)
 
 `Template.postman_collection.json` + `Template.local.postman_environment.json`. Import both, pick
-the **Template — local** environment, and run the collection top to bottom: **71 requests, 99
-assertions**, folders `00 Health` → `09 Teardown`. It is a smoke test of the REST surface, not a
+the **Template — local** environment, and run the collection top to bottom: **82 requests, 120
+assertions**, folders `00 Health` → `10 Teardown`. It is a smoke test of the REST surface, not a
 replacement for Vitest — concurrency, rollback, ledger arithmetic, audit rows and the leak checks
 live there.
 
@@ -1192,18 +1352,25 @@ already generated.
 
 Five things about the collection worth remembering:
 
-- **★ `auth:create` is now the tightest budget in the collection — 8 of 10.** `/auth/register`,
-  `/auth/guest` and `/auth/guest/claim` share one bucket of **10 per minute per IP**, because each
-  mints an account and burns an argon2 hash and an attacker must not get ten of each. One full run
-  spends eight of them (register, two guest joins in folder 06, one join and four claims in folder
-  07). So folder 07 is the *first* place a too-soon rerun 429s — before the global 100/min limiter
-  ever bites — and **a full minute between runs is now mandatory**, not merely advisable. If you add
-  a request that registers, joins as a guest, or claims, take one out. One check was already removed
-  for this reason (see folder 07's description).
-- **A logged-in user masks a guest.** `authenticate` resolves the access cookie *before* the guest
-  cookie, so with both in Postman's jar you are always the user. Folders `06` and `07` clear the jar
-  in a pre-request script and log back in at the end. Any new guest-facing request must sit inside
-  one of those folders, or it will silently assert the host's behaviour.
+- **★ `auth:create` is at 9 of 10 after Phase I, and the global limiter is at 82 of 100.**
+  `/auth/register`, `/auth/guest` and `/auth/guest/claim` share one bucket of **10 per minute per
+  IP**, because each mints an account and burns an argon2 hash and an attacker must not get ten of
+  each. One full run now spends nine (register, two guest joins in folder 06, one join and four
+  claims in folder 07, and folder 08's guest join). **Both budgets now bite on a too-soon rerun**:
+  `auth:create` in folder 07, and the global 100/min limiter in the *teardown* folder — which reads
+  exactly like a broken collection and is not. **A full minute between runs is mandatory.** If you
+  add a request that registers, joins as a guest, or claims, take one out; the next addition of any
+  kind should come with a matching removal, or with `RATE_LIMIT_MAX` raised in `backend/.env` for
+  the duration of the API testing.
+- **★ A logged-in user masks a guest, and Phase I paid to re-learn it.** `authenticate` resolves
+  the access cookie *before* the guest cookie — correctly, since a player who signs up mid-session
+  **is** a user — so with both in Postman's jar you are always the user. Folders `06` and `07` clear
+  the jar in a pre-request script and log back in at the end; folder `08` does it with an explicit
+  `POST /auth/logout` before its guest join, which is a *correctness* step and is documented as one
+  in the request's own description. The first run of folder 08 without it asserted guest rules
+  against a logged-in account and failed on exactly what you would expect: three wallets instead of
+  one, and a 200 where the 403 belongs. **Any new guest-facing request must drop the access cookie
+  first**, or it silently asserts the host's behaviour and passes for the wrong reason.
 - **Folder 07 runs against a table with history.** Folder 05 left a bot at seat 3 and released seat
   1, so the claim journey uses seat **2** — which is worth knowing before adding a seat assertion
   anywhere. And the seat map's `memberId` is what makes the headline claim assertion possible over
@@ -1215,8 +1382,10 @@ Five things about the collection worth remembering:
   deletion once `table:takeSeat` shipped, and it has — but **Newman cannot speak Socket.IO**, and
   folder 07 uses them to seat a guest before asserting that `memberId` and `joinedAt` survive the
   claim. That is the one assertion distinguishing an *updated* seat from a delete-and-reinsert, and
-  therefore the headline check of journey J2. Re-dated for S37. If you ever do delete them, delete
-  folder 07's seat setup in the same commit and say out loud what coverage went with it.
+  therefore the headline check of journey J2. **Undated at S37**: the constraint keeping them is not
+  a missing feature a later session supplies, it is that Newman speaks HTTP and the seat protocol is
+  a socket. If you ever do delete them, delete folder 07's seat setup in the same commit and say out
+  loud what coverage went with it.
 - **Phase F added no REST routes**, so the collection is unchanged — and was re-run against Phase F
   to prove nothing broke: **71 requests, 99 assertions, 0 failures**. The socket surface is verified
   by `backend/requests/socket.md` and by 60 socket tests instead.
@@ -1229,6 +1398,14 @@ Five things about the collection worth remembering:
   three assertions elsewhere. **73 requests, 104 assertions, 0 failures** as of 2026-09-12. Note
   this spends no extra `auth:create` budget: both new requests are table creations by the host who
   is already logged in.
+- **★ Phase I added a folder and renumbered two.** `08 Rewards & the wallet (S35–S38)` covers
+  `GET /wallet`, `GET /wallet/transactions` and the public `GET /rewards/rules`, at all three access
+  levels — so `08 The boundary` became `09` and `09 Teardown` became `10`, keeping one folder per
+  phase in order. Folder 07's two `/_probe/wallet` calls now hit the real `GET /wallet`, because
+  that route is deleted. **82 requests, 120 assertions, 0 failures** as of 2026-09-13. The economy's
+  *writes* are not here and cannot be: a match finishes over a socket, so settlement, forfeiture and
+  the ledger are covered by `tests/integration/reward-settlement.test.ts` and by the two dev scripts
+  in the Phase I verify section above.
 - The next session that *will* touch the collection again is **S37** (`GET /wallet`,
   `/wallet/transactions`) — and it should delete `GET /_probe/wallet` and the
   `/_probe/tables/:id/seats*` routes in the same commit, saying out loud what coverage goes with

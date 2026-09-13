@@ -1,5 +1,10 @@
 import type { AssetCode, TransactionKind } from '../../src/contracts/enums.js'
-import type { RewardRule, Wallet, WalletTransaction } from '../../src/domain/entities/economy.js'
+import type {
+  RewardRule,
+  Subscription,
+  Wallet,
+  WalletTransaction,
+} from '../../src/domain/entities/economy.js'
 import type { CosmeticItem, UserCosmetic } from '../../src/domain/entities/user.js'
 import { GLOBAL_REWARD_RULE_ID } from '../../src/domain/economy/caps.js'
 import type {
@@ -7,9 +12,11 @@ import type {
   CosmeticFilter,
   ICosmeticRepository,
   IRewardRuleRepository,
+  ISubscriptionRepository,
   IWalletRepository,
   LedgerEntry,
   NewRewardRule,
+  NewSubscription,
 } from '../../src/domain/repositories/economy.js'
 import type { PageQuery } from '../../src/domain/repositories/IRepository.js'
 import type { IdentityRef } from '../../src/domain/value-objects/identity.js'
@@ -148,6 +155,69 @@ export class InMemoryWalletRepository implements IWalletRepository {
 
   async markVested(walletId: string): Promise<Wallet> {
     return this.rows.patch(walletId, { status: 'VESTED', updatedAt: new Date() })
+  }
+
+  /**
+   * No lock to take — a single-threaded map has no concurrent writer, which is
+   * the honest fake. The *property* the lock protects (exactly one of two
+   * simultaneous debits succeeds) belongs to the database and is asserted
+   * against a real transaction in `tests/integration/wallet-debit.test.ts`.
+   */
+  async balanceForUpdate(walletId: string): Promise<number> {
+    return this.rows.require(walletId).balance
+  }
+
+  async listPaged(afterId: string | null, limit: number): Promise<Wallet[]> {
+    const sorted = this.rows.all().sort((a, b) => a.id.localeCompare(b.id))
+    const start = afterId === null ? 0 : sorted.findIndex((w) => w.id === afterId) + 1
+    return sorted.slice(start, start + limit)
+  }
+}
+
+/** Premium, read-only until M7 — one consumer: the 1.5× earn multiplier. */
+export class InMemorySubscriptionRepository implements ISubscriptionRepository {
+  readonly rows = new Collection<Subscription>('Subscription')
+
+  async findByUser(userId: string): Promise<Subscription | null> {
+    return this.rows.find((s) => s.userId === userId)
+  }
+
+  async findActive(userId: string, now: Date): Promise<Subscription | null> {
+    const subscription = await this.findByUser(userId)
+    if (subscription === null) return null
+
+    const live =
+      (subscription.status === 'ACTIVE' || subscription.status === 'TRIALING') &&
+      (subscription.currentPeriodEnd === null || subscription.currentPeriodEnd > now)
+    const inGrace =
+      subscription.status === 'PAST_DUE' &&
+      subscription.graceEndsAt !== null &&
+      subscription.graceEndsAt > now
+
+    return live || inGrace ? subscription : null
+  }
+
+  async upsert(userId: string, data: NewSubscription): Promise<Subscription> {
+    const now = new Date()
+    const existing = await this.findByUser(userId)
+    const row: Subscription = {
+      id: existing?.id ?? nextId('sub'),
+      tier: 'PREMIUM',
+      provider: 'stripe',
+      providerCustomerId: null,
+      providerSubId: null,
+      interval: 'month',
+      currentPeriodStart: null,
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
+      canceledAt: null,
+      graceEndsAt: null,
+      ...data,
+      userId,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    }
+    return existing === null ? this.rows.insert(row) : this.rows.patch(row.id, row)
   }
 }
 

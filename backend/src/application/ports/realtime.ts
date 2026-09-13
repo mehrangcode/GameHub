@@ -1,4 +1,5 @@
 import type { ServerToClientEvents } from '../../contracts/events.js'
+import { holderKey, type IdentityRef } from '../../domain/value-objects/identity.js'
 
 /**
  * The broadcasting port — 04 §2, S24.
@@ -16,7 +17,7 @@ import type { ServerToClientEvents } from '../../contracts/events.js'
  *
  * ### Rooms are values, not strings
  *
- * Every room name in the platform is built by one of the four functions below.
+ * Every room name in the platform is built by one of the five functions below.
  * That is what makes 04 §2's guarantee — *public state to the table room,
  * private state to the seat room* — auditable: `rg 'seatRoom\('` finds every
  * place a private projection can possibly go. A hand-assembled
@@ -53,6 +54,25 @@ export function spectatorRoom(tableId: string): Room {
 /** All sockets of one signed-in user, across devices and across tables. */
 export function userRoom(userId: string): Room {
   return `user:${userId}` as Room
+}
+
+/**
+ * ★ The same, for **either** kind of identity — S37's `wallet:updated`.
+ *
+ * The room name *is* the holder key (03 §2), which is deliberate: a wallet
+ * belongs to a holder, and "tell this holder their balance moved" should not
+ * need a branch at every call site depending on whether they have signed up.
+ * A guest accrues coins (10 §3.4) and is entitled to watch them arrive exactly
+ * as a user is — persona P2 says a guest is a first-class actor, not a degraded
+ * user, and a notification path that worked for only one of the two is how the
+ * guest experience quietly rots.
+ *
+ * Carries cross-table notifications only, never a projection: a holder room
+ * spans every table this person is at, so a hand sent here would reach their
+ * other tab at another table.
+ */
+export function holderRoom(holder: IdentityRef): Room {
+  return holderKey(holder) as Room
 }
 
 export type ServerEvent = keyof ServerToClientEvents

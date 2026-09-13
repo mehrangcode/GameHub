@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository State
 
-**M0 Phases A–H (S01–S34) are built.** `backend/` and `frontend/` exist, with **1503 backend tests**
+**M0 Phases A–I (S01–S38) are built.** `backend/` and `frontend/` exist, with **1674 backend tests**
 green: TS-strict scaffolds and the architecture lint guards, the Zod-validated environment, the
 `contracts/` mirror + drift guard, the full Prisma schema and idempotent seed, the repository set
 behind one contract suite run against both fakes and SQLite, cookie auth with refresh rotation and
@@ -12,12 +12,19 @@ table-bound guest tokens, the game catalog, table/invite/seat lifecycle, the wal
 derived idempotency and caps, the guest→user claim transaction, the Socket.IO gateway with the room
 model / presence / chat / optional Redis, the append-only event log (the `_fixture` engine, seed
 commitment, `GameSessionService`'s move pipeline, snapshots and resync, per-viewer projection),
-and — as of Phase H — turn enforcement: absolute deadlines that survive a restart, the private
-warning, the strike ladder with safe default actions, ejection with bot substitution, and seat
-reclamation. **M0's headline exit criterion now runs**: an idle player is warned, struck twice,
-ejected, replaced by a bot, and the table plays on. No `admin-frontend/` yet (that is milestone MA).
-The next session is **S35** — `RewardService.compute`. See `.claude/context/build/context.md`, which
-is the live cursor and is read first, every session.
+turn enforcement (absolute deadlines that survive a restart, the private warning, the strike ladder,
+ejection with bot substitution, seat reclamation), and — as of Phase I — the economy: the pure
+reward formula, per-seat idempotent settlement with forfeiture, live repeat-matchup decay and the
+premium multiplier, wallet reads plus the public rate card, the row-locked debit path, guest
+forfeiture, and a reconciliation job that detects a corrupted balance and refuses to repair it.
+
+**All three of M0's headline exit criteria now run:** an idle player is warned, struck twice,
+ejected, replaced by a bot, and the table plays on; **an ejected player on a winning team earns 0
+while their partner earns in full**; and a corrupted `Wallet.balance` is detected and alerted.
+
+No `admin-frontend/` yet (that is milestone MA). The next session is **S39** — Axios, single-flight
+refresh, `authStore` and the login/register forms, which starts Phase J, the frontend. See
+`.claude/context/build/context.md`, which is the live cursor and is read first, every session.
 
 `Documents/` holds the complete, cross-referenced PRD set for the platform **plus its admin
 console**; `Documents/08-roadmap.md` and `Documents/11-build-plan.md` drive the work.

@@ -69,24 +69,25 @@ Accept: application/json
 ###
 ###   npx tsx scripts/dev-credit.ts --guest-cookie /tmp/g.txt --amount 120
 ###
-### Then read it back. Dev-only route, deleted in S37 when the real
-### `GET /wallet` lands.
+### Then read it back. This is the real `GET /wallet` (S37, level **G**) —
+### `/_probe/wallet` is gone.
 ###
 ### → balance 120, status PROVISIONAL. That word is the whole signup pitch:
 ###   the coins are real, they accrue while she plays, and she cannot spend
 ###   them until she has an account (10 §2.2).
-GET {{api}}/_probe/wallet
+GET {{api}}/wallet
 Accept: application/json
 
-### The statement, in the same payload. Every row carries `balanceAfter`, so a
-### statement renders without the client ever adding anything up — and a
-### `CAP_REJECTED` row with `amount: 0` is a *deliberate* row: the audit of a
-### reward that was earned and then capped away (10 §2.3).
+### ★ And the statement is a **separate, user-only route** (S37). Send this with
+### the guest cookie and it is a 403 — not a 401.
 ###
-### To see one, spend the hourly budget first:
-###   npx tsx scripts/dev-credit.ts --guest-cookie /tmp/g.txt --amount 400
-### then settle a match once S36 exists. Until then the caps are exercised by
-### `tests/unit/wallet/caps.test.ts`, where the boundaries are cheap to reach.
+### A statement is an account feature: a guest's ledger is two unspendable rows
+### about to be vested or forfeited, and there is nothing to reconcile. 403 is
+### also the honest status, because "refresh and retry" is advice a guest can
+### never act on; it renders as "sign up to do this" (the same reasoning as
+### `requireUser`, S13).
+GET {{api}}/wallet/transactions
+Accept: application/json
 
 ### ── S22 · ★ the claim ───────────────────────────────────────────────────────
 
@@ -121,7 +122,23 @@ Content-Type: application/json
 
 ### → vested 120, and all three assets, because a user holds COIN, GEM and
 ###   TICKET from the moment the account exists (10 §2.1).
-GET {{api}}/_probe/wallet
+GET {{api}}/wallet
+Accept: application/json
+
+### And now the statement works, because Sara has an account. Every row carries
+### `balanceAfter`, so it renders without the client adding anything up.
+###
+### ★ A `CAP_REJECTED` row with `amount: 0` is a **deliberate** row, not a gap:
+### the audit of a reward that was earned and then capped or forfeited away
+### (10 §2.3). Its `reason` is a machine code — `CAP_PER_HOUR:120`,
+### `EJECTED_TIMEOUT` — never an English sentence, so a Persian reader renders
+### the statement with no round-trip through the server (02 §8.1).
+GET {{api}}/wallet/transactions?limit=20
+Accept: application/json
+
+### → 400 VALIDATION_FAILED. There is no field with which to ask for somebody
+###   else's statement, and supplying one is refused rather than ignored (P7).
+GET {{api}}/wallet/transactions?holder=someone-else
 Accept: application/json
 
 ### In Studio, the ledger tells the same story from both sides:
@@ -192,3 +209,76 @@ Content-Type: application/json
   "email": "host@test.dev",
   "password": "correct-horse-battery"
 }
+
+
+### ══ Phase I · S37 — the rate card, and S38 — the ledger's own audit ═════════
+
+### ★ No cookie. None. This is the one economy endpoint that is public, and it
+### is public on purpose (10 §11).
+###
+### An opaque economy invites accusations of rigging. Publishing the formula
+### makes the caps and the decay curve defensible, makes forfeiture read as a
+### rule rather than a punishment, and makes a support question answerable by
+### pointing at a number.
+###
+### Two things to look for in the response:
+###
+###   rules[].base         → Shelem is 80, the best rate in the game. That is
+###                          product design: it asks for 45 minutes and three
+###                          other people, and the economy should reward
+###                          showing up for it.
+###   integrityFactors     → EJECTED_TIMEOUT is 0, REPLACED_RETURNED is 0.5,
+###                          RESIGNED is 0.25. A player could have read that
+###                          *before* being ejected, which is the whole point.
+###
+### And what is NOT there: `guestVestCap`. It is not a rate — it is the bound
+### on what a farming run is worth, and the only thing publishing it changes is
+### how efficiently somebody can run up to it.
+GET {{api}}/rewards/rules
+Accept: application/json
+
+### ── ★★ S38 · break invariant E1, and watch it be caught ─────────────────────
+###
+### This is M0's third exit criterion and the one worth doing by hand. It is
+### two commands.
+###
+###   npx tsx scripts/dev-corrupt-balance.ts --email me@test.dev --set 999999
+###   npx tsx scripts/dev-reconcile.ts
+###
+### → ALERT: wallet <id> cached 999999, computed <real>, drift +999499
+### → exit code 1, so a cron entry can page on it directly
+###
+### `dev-corrupt-balance.ts` is the only file in the repository that writes
+### `Wallet.balance` without appending a ledger row, and it needs raw Prisma to
+### do it — because `IWalletRepository` exposes no balance setter at all. E1 is
+### a shape nobody can express, not a rule somebody must remember. If that
+### script ever becomes writable through a service, something has gone wrong.
+###
+### ★★ THEN LOOK IN STUDIO, and look at two things:
+###
+###   SecurityEvent   a LEDGER_DRIFT row, severity ALERT, with both numbers in
+###                   detailsJson.
+###   Wallet.balance  STILL 999999.
+###
+### The job did **not** repair it, deliberately. "What is the balance" was
+### never the interesting question — the ledger has always answered that.
+### "Which write path produced 999999" is, and a silent self-heal would have
+### erased the only evidence of it.
+###
+###   npx tsx scripts/dev-corrupt-balance.ts --email me@test.dev --repair
+###   npx tsx scripts/dev-reconcile.ts        # → clean, exit 0
+
+### ── S38 · expired guest balances ────────────────────────────────────────────
+###
+###   npx tsx scripts/dev-forfeit.ts
+###
+### A guest session lives 12 hours. One that expires unclaimed still holds a
+### PROVISIONAL balance, and that balance stops existing **as a ledger row**,
+### never as an UPDATE that sets a column to zero:
+###
+###   WalletTransaction   GUEST_FORFEIT, amount −N, reason GUEST_EXPIRED,
+###                       keyed forfeit:{guestSessionId}
+###
+### Run it twice — the second run forfeits nothing, because the key is derived
+### (E2). And run `dev-reconcile.ts` afterwards: the zeroed wallets are clean,
+### because balance == Σ transactions never stopped being true.

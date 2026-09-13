@@ -50,6 +50,7 @@ import type { ChatService } from './ChatService.js'
 import type { GameCatalogService } from './GameCatalogService.js'
 import type { MetricsRegistry } from './MetricsRegistry.js'
 import type { SecurityEventService } from './SecurityEventService.js'
+import type { SettlementService } from './SettlementService.js'
 import type { TableService } from './TableService.js'
 
 /**
@@ -97,6 +98,13 @@ export interface GameSessionDeps {
   readonly metrics: MetricsRegistry
   readonly logger: Logger
   readonly clock?: Clock
+  /**
+   * Phase I. Optional for the same reason `IRealtimePublisher` is detachable:
+   * a great many tests exercise the move pipeline with no economy at all, and
+   * a settlement that is simply absent is more honest there than a stub that
+   * pretends to pay. `container.ts` always provides one.
+   */
+  readonly settlement?: SettlementService
   /** Injected in tests so a deal is reproducible; production draws from the CSPRNG. */
   readonly seedRng?: Rng
   /** Counts rejections for the illegal-move escalation. Optional; absent ⇒ never escalate. */
@@ -421,7 +429,10 @@ export class GameSessionService {
       seat,
       by: input.kind === 'TIMEOUT' ? 'timeout' : (input.anonymous ?? false) ? 'bot' : 'human',
     })
-    if (outcome.finished !== null) this.announceFinish(outcome.instance, outcome.finished)
+    if (outcome.finished !== null) {
+      this.announceFinish(outcome.instance, outcome.finished)
+      await this.settle(outcome.instance, outcome.finished)
+    }
 
     this.deps.metrics.increment('moves_applied')
     return { instance: outcome.instance, seq: outcome.seq, replayed: false }
@@ -768,7 +779,9 @@ export class GameSessionService {
         const revealed = await this.deps.repos.games.revealSeed(instance.id, at)
         await this.deps.repos.tables.update(instance.tableId, { status: 'FINISHED' })
 
-        this.announceFinish(revealed, { result: rebuilt.engine.result(rebuilt.state), at })
+        const finish = { result: rebuilt.engine.result(rebuilt.state), at }
+        this.announceFinish(revealed, finish)
+        await this.settle(revealed, finish)
         settled += 1
 
         this.deps.logger.warn(
@@ -872,6 +885,36 @@ export class GameSessionService {
        * transaction rather than inside the engine.
        */
       descriptor: describeSafely(rebuilt, event),
+    }
+  }
+
+  /**
+   * ★ Settlement runs **after** the move's transaction commits — S36.
+   *
+   * Not inside it, and the distinction matters in both directions:
+   *
+   *   - A failure while paying must not un-play the last card. The log is the
+   *     truth (P4); a game that finished, finished. Rolling the move back
+   *     because a wallet write failed would make the match disagree with the
+   *     event log that produced it.
+   *   - A failure here must not turn a played card into a 500 either. The error
+   *     is logged and swallowed, and the game stays settleable: `MatchResult`
+   *     does not exist, so `reconcileActive()` picks it up at the next boot and
+   *     `settle` is idempotent besides.
+   *
+   * Settlement owns its own all-or-nothing transaction, so *within* it a
+   * partially-paid match is still impossible — which is the property 11 S36
+   * actually asks for.
+   */
+  private async settle(instance: GameInstance, finish: GameFinish): Promise<void> {
+    if (this.deps.settlement === undefined) return
+    try {
+      await this.deps.settlement.settle(instance, finish.result, finish.at)
+    } catch (error) {
+      this.deps.logger.error(
+        { err: error, gameId: instance.id, tableId: instance.tableId },
+        'settlement failed; the match stands and will be retried at boot',
+      )
     }
   }
 

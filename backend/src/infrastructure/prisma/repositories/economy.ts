@@ -1,5 +1,6 @@
 import type { AssetCode, TransactionKind } from '../../../contracts/enums.js'
-import type { RewardRule, Wallet } from '../../../domain/entities/economy.js'
+import { getEnv } from '../../../config/env.js'
+import type { RewardRule, Subscription, Wallet } from '../../../domain/entities/economy.js'
 import type { WalletTransaction } from '../../../domain/entities/economy.js'
 import type { CosmeticItem, UserCosmetic } from '../../../domain/entities/user.js'
 import { GLOBAL_REWARD_RULE_ID } from '../../../domain/economy/caps.js'
@@ -9,9 +10,11 @@ import type {
   CosmeticFilter,
   ICosmeticRepository,
   IRewardRuleRepository,
+  ISubscriptionRepository,
   IWalletRepository,
   LedgerEntry,
   NewRewardRule,
+  NewSubscription,
 } from '../../../domain/repositories/economy.js'
 import type { PageQuery } from '../../../domain/repositories/IRepository.js'
 import type { IdentityRef } from '../../../domain/value-objects/identity.js'
@@ -21,6 +24,7 @@ import {
   toJson,
   toJsonOrNull,
   toRewardRule,
+  toSubscription,
   toUserCosmetic,
   toWallet,
   toWalletTransaction,
@@ -201,6 +205,46 @@ export class PrismaWalletRepository extends PrismaRepositoryBase implements IWal
     }
   }
 
+  /**
+   * ★ 10 §2.5 — the row-locked balance read the debit path needs.
+   *
+   * `SELECT … FOR UPDATE` on PostgreSQL. On SQLite the raw statement is not
+   * supported and is not needed either: the engine serializes writers, so the
+   * read-then-write window the lock exists to close does not open in the first
+   * place. The **property** — two simultaneous purchases with one item's worth
+   * of coins produce exactly one debit — therefore holds on both providers,
+   * and `tests/integration/wallet-debit.test.ts` asserts it against whichever
+   * one is configured.
+   *
+   * Only meaningful inside a transaction; outside one the lock is taken and
+   * released before the caller can act on the number, which is why the debit
+   * path calls it from within `uow.run`.
+   */
+  async balanceForUpdate(walletId: string): Promise<number> {
+    if (getEnv().DATABASE_PROVIDER === 'postgresql') {
+      const rows = await this.db.$queryRawUnsafe<{ balance: number | bigint }[]>(
+        'SELECT "balance" FROM "Wallet" WHERE "id" = $1 FOR UPDATE',
+        walletId,
+      )
+      const found = rows[0]
+      if (found === undefined) throw new NotFoundError('Wallet', { id: walletId })
+      return Number(found.balance)
+    }
+
+    const wallet = await this.db.wallet.findUnique({ where: { id: walletId } })
+    if (wallet === null) throw new NotFoundError('Wallet', { id: walletId })
+    return wallet.balance
+  }
+
+  async listPaged(afterId: string | null, limit: number): Promise<Wallet[]> {
+    const rows = await this.db.wallet.findMany({
+      orderBy: { id: 'asc' },
+      take: limit,
+      ...(afterId === null ? {} : { cursor: { id: afterId }, skip: 1 }),
+    })
+    return rows.map(toWallet)
+  }
+
   async markVested(walletId: string): Promise<Wallet> {
     return this.mapMissing(
       async () =>
@@ -319,6 +363,61 @@ export class PrismaCosmeticRepository extends PrismaRepositoryBase implements IC
         where: { userId_cosmeticId: { userId, cosmeticId } },
         create: { userId, cosmeticId, unlockedAt: at },
         update: {},
+      }),
+    )
+  }
+}
+
+/**
+ * Premium, read-only until M7 — 10 §6.
+ *
+ * One consumer at M0: the 1.5× earn multiplier. No provider SDK, no checkout,
+ * no webhook — a `Subscription` row is, from here, just a column that says
+ * whether the perks are live.
+ */
+export class PrismaSubscriptionRepository
+  extends PrismaRepositoryBase
+  implements ISubscriptionRepository
+{
+  async findByUser(userId: string): Promise<Subscription | null> {
+    const row = await this.db.subscription.findUnique({ where: { userId } })
+    return row === null ? null : toSubscription(row)
+  }
+
+  /**
+   * ★ Live *right now*, which is not the same as `status === 'ACTIVE'`.
+   *
+   * Two departures from the naive read, both from 10 §6.3:
+   *
+   *   - **`PAST_DUE` still counts inside `graceEndsAt`.** A declined card is
+   *     usually an expired one, and taking somebody's earn rate away the hour
+   *     it happens punishes an administrative failure as if it were a lapse.
+   *   - **`currentPeriodEnd` is checked, not trusted.** A row left `ACTIVE` by
+   *     a provider webhook that never arrived would otherwise pay 1.5× forever.
+   */
+  async findActive(userId: string, now: Date): Promise<Subscription | null> {
+    const row = await this.db.subscription.findUnique({ where: { userId } })
+    if (row === null) return null
+
+    const subscription = toSubscription(row)
+    const live =
+      (subscription.status === 'ACTIVE' || subscription.status === 'TRIALING') &&
+      (subscription.currentPeriodEnd === null || subscription.currentPeriodEnd > now)
+    const inGrace =
+      subscription.status === 'PAST_DUE' &&
+      subscription.graceEndsAt !== null &&
+      subscription.graceEndsAt > now
+
+    return live || inGrace ? subscription : null
+  }
+
+  async upsert(userId: string, data: NewSubscription): Promise<Subscription> {
+    const { userId: _ignored, ...rest } = data
+    return toSubscription(
+      await this.db.subscription.upsert({
+        where: { userId },
+        create: { userId, ...rest },
+        update: rest,
       }),
     )
   }

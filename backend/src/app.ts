@@ -15,6 +15,7 @@ import { buildHealthRouter } from './interface/http/routes/health.routes.js'
 import { buildInvitesRouter } from './interface/http/routes/invites.routes.js'
 import { buildProbeRouter } from './interface/http/routes/probe.routes.js'
 import { buildTablesRouter } from './interface/http/routes/tables.routes.js'
+import { buildWalletRouter } from './interface/http/routes/wallet.routes.js'
 
 /** Liveness and readiness are exempt from the global limiter — see below. */
 const PROBE_PATH = /^(\/api\/v1)?\/(health|ready)$/
@@ -104,6 +105,8 @@ export function buildApp(container: Container): Express {
   app.use(API_PREFIX, buildAuthRouter(container))
   app.use(API_PREFIX, buildGamesRouter(container))
   app.use(API_PREFIX, buildTablesRouter(container))
+  // S37 — `GET /wallet` (G), `/wallet/transactions` (U), `/rewards/rules` (P).
+  app.use(API_PREFIX, buildWalletRouter(container))
   // `/invites/:code` is its own router because it is the one table-adjacent
   // route with no authentication at all — keeping it out of the tables router
   // means nobody can add a `requireIdentity()` to that file and silently break

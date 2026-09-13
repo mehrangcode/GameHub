@@ -155,6 +155,7 @@ describe('the seat room is reachable from a short, named list of places', () => 
    * | `GameSessionService` | **The** projection path. It *is* the mechanism the seat room exists for: `projectState` once per viewer, each payload to the one room entitled to it (04 §4.1) |
    * | `TurnTimerService` | `game:ejectionWarning` (04 §6.2). A private nudge — broadcasting it would shame somebody in front of the table *and* tell the other three exactly when to expect a free trick |
    * | `SeatEnforcementService` | `game:rewardPreview` (04 §6.6). What this ejection costs *you*. Somebody else's forfeit is nobody else's business |
+   * | `SettlementService` | `game:rewardPreview` and `game:rewardSettled` (10 §10). Somebody's coins, and the reason they earned none. `game:finished` already told the table who won; how much each seat was paid is between the platform and that player |
    *
    * Anything else wanting to reach a seat should be publishing through the
    * port, where the addressing decision is reviewable.
@@ -163,6 +164,7 @@ describe('the seat room is reachable from a short, named list of places', () => 
     'application/services/GameSessionService.ts',
     'application/services/TurnTimerService.ts',
     'application/services/SeatEnforcementService.ts',
+    'application/services/SettlementService.ts',
   ]
 
   it('nothing outside the socket layer and that list names a seat room', () => {
@@ -179,9 +181,9 @@ describe('the seat room is reachable from a short, named list of places', () => 
     expect(callers).toEqual([])
   })
 
-  it('★ and the two Phase H additions send no game state down that channel', () => {
-    // The reason the list above is safe to extend: a warning and a reward
-    // preview carry no projection. If either service ever learns to emit
+  it('★ and every addition since sends no game state down that channel', () => {
+    // The reason the list above is safe to extend: a warning, a reward preview
+    // and a receipt carry no projection. If any of them ever learns to emit
     // `game:state`, the single-emitter assertion in this file fails first.
     for (const path of SEAT_ADDRESSABLE.slice(1)) {
       const file = sources.find((entry) => entry.path === path)!

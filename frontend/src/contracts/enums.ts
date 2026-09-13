@@ -195,6 +195,15 @@ export const SECURITY_EVENT_KINDS = [
   'SEAT_IMPERSONATION',
   'RATE_LIMIT',
   'INVITE_ABUSE',
+  /**
+   * ★ E1, violated — S38. `Wallet.balance` disagrees with `Σ transactions`.
+   *
+   * Always an `ALERT`, and never self-healed: the interesting question is not
+   * "what is the balance" (the ledger already answers that) but *"which write
+   * path lied"*, and a job that quietly corrected the column would erase the
+   * only evidence of it. 10 §2.3.
+   */
+  'LEDGER_DRIFT',
 ] as const
 export type SecurityEventKind = (typeof SECURITY_EVENT_KINDS)[number]
 export const SecurityEventKindSchema = z.enum(SECURITY_EVENT_KINDS)

@@ -48,6 +48,8 @@ export const DEFAULT_SEVERITY: Record<SecurityEventKind, SecuritySeverity> = {
   BAD_TOKEN: 'WARN',
   /** Someone is using a credential outside its binding. Always loud. */
   SEAT_IMPERSONATION: 'ALERT',
+  /** A cached balance that disagrees with its ledger is money going wrong (E1). */
+  LEDGER_DRIFT: 'ALERT',
 }
 
 export class SecurityEventService {

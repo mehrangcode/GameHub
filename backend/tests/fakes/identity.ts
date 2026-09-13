@@ -128,6 +128,13 @@ export class InMemoryGuestSessionRepository implements IGuestSessionRepository {
     return this.rows.patch(id, { claimedAt: at, claimedByUserId: userId })
   }
 
+  async listExpiredUnclaimed(now: Date, limit: number): Promise<GuestSession[]> {
+    return this.rows
+      .filter((g) => g.expiresAt.getTime() <= now.getTime() && g.claimedAt === null)
+      .sort((a, b) => a.expiresAt.getTime() - b.expiresAt.getTime())
+      .slice(0, limit)
+  }
+
   async deleteExpired(now: Date): Promise<number> {
     const stale = this.rows.filter((g) => g.expiresAt.getTime() <= now.getTime())
     for (const row of stale) this.rows.remove(row.id)

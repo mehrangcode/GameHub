@@ -14,8 +14,12 @@ import { InviteService } from './application/services/InviteService.js'
 import { LoginThrottle } from './application/services/LoginThrottle.js'
 import { MetricsRegistry } from './application/services/MetricsRegistry.js'
 import { PresenceService } from './application/services/PresenceService.js'
+import { GuestForfeitService } from './application/services/GuestForfeitService.js'
+import { ReconciliationService } from './application/services/ReconciliationService.js'
+import { RewardService } from './application/services/RewardService.js'
 import { SeatEnforcementService } from './application/services/SeatEnforcementService.js'
 import { SecurityEventService } from './application/services/SecurityEventService.js'
+import { SettlementService } from './application/services/SettlementService.js'
 import { TableService } from './application/services/TableService.js'
 import { TurnTimerService } from './application/services/TurnTimerService.js'
 import { WalletService } from './application/services/WalletService.js'
@@ -73,6 +77,23 @@ export interface Container {
    * the idempotency rule cannot be bypassed by adding a new earn source.
    */
   readonly wallets: WalletService
+
+  /**
+   * S35 — reward policy. Stateless: `RewardService.compute` is static and pure,
+   * and the instance exists only for the three lookups the formula needs (the
+   * rate card, the subscription, the repeat-matchup count).
+   */
+  readonly rewards: RewardService
+  /**
+   * ★ S36 — the only thing in the platform that pays somebody for playing.
+   * One transaction per finished match, per seat, keyed by
+   * `match:{matchResultId}:{seat}`.
+   */
+  readonly settlement: SettlementService
+  /** ★ S38 — E1, measured. Raises `LEDGER_DRIFT` and never self-heals. */
+  readonly reconciliation: ReconciliationService
+  /** S38 — expired provisional balances, zeroed by a ledger row (10 §3.4). */
+  readonly guestForfeits: GuestForfeitService
   /** S22 — journey J2, in one transaction. */
   readonly guestClaims: GuestClaimService
 
@@ -210,7 +231,25 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
     logger,
   })
 
-  const wallets = new WalletService({ uow, repos, metrics, logger })
+  /**
+   * Declared here, well before the gateway exists, because `WalletService`
+   * needs it and is built first. That costs nothing: a `MutableRealtimePublisher`
+   * with nothing attached silently drops, which is the right behaviour for the
+   * whole window before `createGateway` attaches the Socket.IO adapter.
+   */
+  const realtime = new MutableRealtimePublisher()
+
+  const wallets = new WalletService({ uow, repos, metrics, logger, realtime })
+
+  /**
+   * The two S38 maintenance jobs. Ordinary services with an ordinary method —
+   * there is no scheduler in this process and deliberately so (see each class's
+   * docblock). `scripts/dev-reconcile.ts` and `scripts/dev-forfeit.ts` invoke
+   * them in development; production schedules them the way it already
+   * schedules anything else.
+   */
+  const reconciliation = new ReconciliationService({ repos, security, metrics, logger })
+  const guestForfeits = new GuestForfeitService({ repos, wallets, metrics, logger })
 
   const guestClaims = new GuestClaimService({
     uow,
@@ -232,7 +271,6 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
   const registry = buildGameRegistry({ includeDevGames: env.NODE_ENV !== 'production' })
   const catalog = new GameCatalogService(registry)
 
-  const realtime = new MutableRealtimePublisher()
   const tables = new TableService({ repos, catalog, security, metrics, logger, realtime })
 
   const presence = new PresenceService({
@@ -268,6 +306,27 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
     logger.error({ err: error }, 'turn observer threw'),
   )
 
+  /**
+   * ★ Phase I. `rewards` is stateless policy; `settlement` is the only thing in
+   * the platform that may pay somebody for playing.
+   *
+   * Built **before** `games` because the dependency runs one way only: a
+   * finished game settles, and settlement has no interest in the move pipeline.
+   * That is the difference between this and the turn observer above — no port,
+   * no late binding, no attachment order to get wrong.
+   */
+  const rewards = new RewardService({ repos })
+
+  const settlement = new SettlementService({
+    uow,
+    repos,
+    rewards,
+    wallets,
+    realtime,
+    metrics,
+    logger,
+  })
+
   const games = new GameSessionService({
     uow,
     repos,
@@ -282,6 +341,7 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
     rateLimiter,
     clock: overrides.clock ?? systemClock,
     turns,
+    settlement,
   })
 
   const turnTimers = new TurnTimerService({
@@ -336,6 +396,10 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
     auth,
     guests,
     wallets,
+    rewards,
+    settlement,
+    reconciliation,
+    guestForfeits,
     guestClaims,
     registry,
     catalog,

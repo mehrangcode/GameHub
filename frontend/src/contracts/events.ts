@@ -7,6 +7,7 @@ import type { PresenceState } from './dto/presence.js'
 import type { MemberView, OccupantView, TableDetail } from './dto/tables.js'
 import type { Identity } from './dto/auth.js'
 import {
+  type AssetCode,
   BotDifficultySchema,
   type EjectionReason,
   type GameEventKind,
@@ -479,6 +480,64 @@ export interface GameRewardPreviewPayload {
   readonly reasonKey: string
 }
 
+/**
+ * ★ What this seat was actually paid — 10 §10, §11. Seat-private.
+ *
+ * Sent after settlement commits, to `seat:{tableId}:{n}` and nowhere else. It
+ * carries somebody's coins and, when they earned nothing, the reason — neither
+ * of which is the rest of the table's business. `game:finished` is the public
+ * announcement; this is the receipt.
+ *
+ * `factors` is §11's transparency requirement, verbatim: the client renders
+ * "Shelem base 80 · 1st place ×1.5 · premium ×1.5 → 180" from these numbers
+ * without asking the server anything. An opaque economy invites accusations of
+ * rigging, and a forfeiture nobody can see the arithmetic of reads as a bug.
+ */
+export interface GameRewardSettledPayload {
+  readonly gameId: string
+  readonly tableId: string
+  readonly seat: number
+  /** What landed in the wallet. 0 when forfeited or fully capped. */
+  readonly coinsAwarded: number
+  /** What the formula produced, before the earn caps. */
+  readonly earned: number
+  /** ★ The match paid, and this seat alone was zeroed (10 §5.2 rule 1). */
+  readonly forfeited: boolean
+  /** Set whenever less than the full reward landed; an i18n key, never prose. */
+  readonly reasonKey: string | null
+  /** True when an earn cap (E7) reduced the credit. */
+  readonly capped: boolean
+  /** `CAP_PER_HOUR`, `CAP_PER_DAY`, … — a machine code (10 §2.4). */
+  readonly capCode: string | null
+  readonly factors: {
+    readonly base: number
+    readonly placement: number
+    readonly premium: number
+    readonly integrity: number
+    readonly repeatDecay: number
+    readonly duration: number
+  }
+}
+
+/**
+ * Any change to a balance — 10 §10. To `user:{id}`, or to a guest's own socket.
+ *
+ * `vested` and `provisional` are reported separately rather than as one number
+ * because they mean different things to the person reading them: a guest's
+ * provisional balance is the signup pitch ("120 coins waiting — create an
+ * account to keep them"), and collapsing the two would make the pitch
+ * impossible to render.
+ */
+export interface WalletUpdatedPayload {
+  readonly asset: AssetCode
+  readonly vested: number
+  readonly provisional: number
+  /** What just moved. Absent for a plain refresh. */
+  readonly delta?: number
+  /** Why it moved: a `TransactionKind`, or a cap code. */
+  readonly reason?: string
+}
+
 /** To the offender's socket only. The same refusal also lands in the ack. */
 export interface GameMoveRejectedPayload {
   readonly gameId: string
@@ -625,6 +684,10 @@ export interface ServerToClientEvents {
   'game:playerEjected': (payload: GamePlayerEjectedPayload) => void
   'game:playerReturned': (payload: GamePlayerReturnedPayload) => void
   'game:rewardPreview': (payload: GameRewardPreviewPayload) => void
+
+  /** Phase I. `game:rewardSettled` is seat-private; `wallet:updated` is per-holder. */
+  'game:rewardSettled': (payload: GameRewardSettledPayload) => void
+  'wallet:updated': (payload: WalletUpdatedPayload) => void
 
   error: (payload: SocketErrorPayload) => void
 }

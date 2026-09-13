@@ -1,6 +1,7 @@
 import type { Logger } from 'pino'
 import type { AssetCode, TransactionKind } from '../../contracts/enums.js'
 import type { Wallet, WalletTransaction } from '../../domain/entities/economy.js'
+import { adminAdjustKey } from '../../domain/economy/idempotency.js'
 import {
   DAY_MS,
   HOUR_MS,
@@ -15,10 +16,15 @@ import {
   type CapLimits,
   type CapUsage,
 } from '../../domain/economy/caps.js'
-import { ValidationError } from '../../domain/errors/errors.js'
+import {
+  ForbiddenError,
+  InsufficientFundsError,
+  ValidationError,
+} from '../../domain/errors/errors.js'
 import type { PageQuery } from '../../domain/repositories/IRepository.js'
 import type { IUnitOfWork, Repositories } from '../../domain/repositories/Repositories.js'
 import { holderKey, type IdentityRef } from '../../domain/value-objects/identity.js'
+import { holderRoom, type IRealtimePublisher } from '../ports/realtime.js'
 import type { MetricsRegistry } from './MetricsRegistry.js'
 
 /**
@@ -86,6 +92,37 @@ export interface CreditInput {
   readonly exemptFromCaps?: boolean
 }
 
+/** The debit half of {@link CreditInput}. `amount` is the **positive** magnitude. */
+export interface DebitInput {
+  readonly holder: IdentityRef
+  readonly asset: AssetCode
+  /** Positive. The sign is applied by {@link WalletService.debit}. */
+  readonly amount: number
+  readonly kind: TransactionKind
+  readonly idempotencyKey: string
+  readonly reason?: string
+  readonly refKind?: string
+  readonly refId?: string
+  /**
+   * Bypasses the guest refusal **and** the balance check. Set by exactly one
+   * caller — an operator clawing back a credit that should never have been
+   * made (12 §7.2). A guest's forfeited provisional balance uses it too, since
+   * expiry is the platform zeroing a wallet, not the guest spending it.
+   */
+  readonly allowOverdraft?: boolean
+}
+
+export interface AdminAdjustInput {
+  readonly holder: IdentityRef
+  readonly asset: AssetCode
+  /** Signed: positive credits, negative claws back. */
+  readonly amount: number
+  /** ★ Mandatory, and enforced. Not a UI placeholder — 12 §7.2. */
+  readonly reason: string
+  /** The audit row that authorised it. The idempotency key is derived from it. */
+  readonly auditLogId: string
+}
+
 export interface CreditResult {
   readonly transaction: WalletTransaction
   readonly wallet: Wallet
@@ -121,8 +158,13 @@ export interface WalletServiceDeps {
   readonly repos: Repositories
   readonly metrics: MetricsRegistry
   readonly logger: Logger
+  /** S37. Optional: every unit test in `tests/unit/wallet` runs without one. */
+  readonly realtime?: IRealtimePublisher
   readonly now?: () => Date
 }
+
+/** Short enough to be typeable, long enough that "x" is not a reason. */
+export const ADMIN_ADJUST_REASON_MIN = 4
 
 export class WalletService {
   private readonly now: () => Date
@@ -133,7 +175,54 @@ export class WalletService {
 
   /** Opens its own transaction. See {@link creditWithin} for the nested case. */
   async credit(input: CreditInput): Promise<CreditResult> {
-    return this.deps.uow.run(async (repos) => this.creditWithin(repos, input))
+    const result = await this.deps.uow.run(async (repos) => this.creditWithin(repos, input))
+    await this.announce(input.holder, input.asset, {
+      delta: result.applied ? result.credited : 0,
+      reason: result.transaction.reason ?? result.transaction.kind,
+    })
+    return result
+  }
+
+  /**
+   * ★ `wallet:updated` — 10 §10. Called **after** the transaction commits.
+   *
+   * Never from inside one, and the reason is the obvious one: a transaction can
+   * still roll back, and a client told its balance rose to 340 by a write that
+   * then vanished has been lied to in the one part of the product where being
+   * lied to matters. {@link creditWithin} therefore announces nothing — the
+   * caller that owns the transaction owns the announcement, which is why
+   * `SettlementService` calls this once per holder after its own commit.
+   *
+   * `vested` and `provisional` are reported separately because they mean
+   * different things to the reader: a guest's provisional balance is the entire
+   * signup pitch ("120 coins waiting"), and one combined number could not
+   * render it.
+   *
+   * Failures are swallowed. A notification that did not arrive is a stale
+   * screen and a refresh; an exception here would turn a *successful payment*
+   * into a failed request, which is strictly worse.
+   */
+  async announce(
+    holder: IdentityRef,
+    asset: AssetCode,
+    change: { delta?: number; reason?: string } = {},
+  ): Promise<void> {
+    if (this.deps.realtime === undefined) return
+
+    try {
+      const wallet = await this.deps.repos.wallets.findByHolder(holder, asset)
+      if (wallet === null) return
+
+      this.deps.realtime.publish(holderRoom(holder), 'wallet:updated', {
+        asset,
+        vested: wallet.status === 'VESTED' ? wallet.balance : 0,
+        provisional: wallet.status === 'PROVISIONAL' ? wallet.balance : 0,
+        ...(change.delta === undefined ? {} : { delta: change.delta }),
+        ...(change.reason === undefined || change.reason === null ? {} : { reason: change.reason }),
+      })
+    } catch (error) {
+      this.deps.logger.warn({ err: error, asset }, 'wallet:updated could not be sent')
+    }
   }
 
   /**
@@ -227,6 +316,139 @@ export class WalletService {
       credited: result.applied ? decision.amount : result.transaction.amount,
       capCode: decision.code,
     }
+  }
+
+  /**
+   * ★ The debit path — S38. 10 §2.5, and the one place money leaves a wallet.
+   *
+   * Three things happen in one transaction, in this order, and the order is the
+   * safety property:
+   *
+   *   1. **`balanceForUpdate` takes a row lock.** A plain read followed by a
+   *      write is a real double-spend: two purchases arriving together both see
+   *      the same balance, both pass the check, and both debit. The lock is
+   *      what makes exactly one of them win.
+   *   2. the balance is checked against the amount, and an insufficient one
+   *      throws **before anything is written** — there is no partial debit and
+   *      no state to unwind.
+   *   3. `append` writes the negative row and the cached balance together (E1).
+   *
+   * Idempotent by the same derived key as a credit: a retried purchase returns
+   * the original row and charges nothing.
+   *
+   * No store UI hangs off this yet — M7 owns the catalogue and the cosmetic
+   * grant. This is the primitive, built now because the *concurrency* property
+   * is the thing worth getting right while it is cheap to test.
+   */
+  async debit(input: DebitInput): Promise<CreditResult> {
+    this.assertSpendable(input)
+
+    const result = await this.deps.uow.run(async (repos) => {
+      const wallet = await repos.wallets.ensure(input.holder, input.asset)
+
+      const existing = await repos.wallets.findTransactionByKey(wallet.id, input.idempotencyKey)
+      if (existing) {
+        this.deps.metrics.increment('wallet_credits_replayed')
+        return {
+          transaction: existing,
+          wallet,
+          applied: false,
+          requested: input.amount,
+          credited: existing.amount,
+          capCode: null,
+        }
+      }
+
+      const available = await repos.wallets.balanceForUpdate(wallet.id)
+      if (available < input.amount && input.allowOverdraft !== true) {
+        this.deps.metrics.increment('wallet_debits_refused')
+        throw new InsufficientFundsError(input.amount, available, { asset: input.asset })
+      }
+
+      const appended = await repos.wallets.append({
+        walletId: wallet.id,
+        amount: -input.amount,
+        kind: input.kind,
+        idempotencyKey: input.idempotencyKey,
+        reason: input.reason ?? null,
+        refKind: input.refKind ?? null,
+        refId: input.refId ?? null,
+      })
+
+      this.deps.metrics.increment('wallet_debits')
+      return {
+        transaction: appended.transaction,
+        wallet: appended.wallet,
+        applied: appended.applied,
+        requested: input.amount,
+        credited: -input.amount,
+        capCode: null,
+      }
+    })
+
+    await this.announce(input.holder, input.asset, {
+      delta: result.applied ? -input.amount : 0,
+      reason: input.reason ?? input.kind,
+    })
+    return result
+  }
+
+  /**
+   * ★ 12 §7.2 — an operator moving somebody's balance by hand.
+   *
+   * Two things are non-negotiable and both are enforced here rather than in the
+   * admin UI, because a UI is a suggestion and a service is a rule:
+   *
+   *   - **A written reason.** `reason` is a column and a refusal, not a
+   *     placeholder. An adjustment nobody can explain later is indistinguishable
+   *     from a bug in the credit path, and this is the one transaction kind with
+   *     no causing event to point at.
+   *   - **A derived key.** `admin:{auditLogId}` (10 §2.4) ties the money to the
+   *     audit row that authorised it, so "the balance moved" and "somebody is
+   *     accountable for it" cannot exist apart — the same discipline the ledger
+   *     applies to every other credit.
+   *
+   * Exempt from the earn caps: an operator correcting a mistake must not have
+   * the correction silently eaten, which would make the ledger *less* true.
+   * The admin routes that call this land in Phase L; the primitive is here
+   * because it belongs beside the ledger, not beside the console.
+   */
+  async adminAdjust(input: AdminAdjustInput): Promise<CreditResult> {
+    const reason = input.reason.trim()
+    if (reason.length < ADMIN_ADJUST_REASON_MIN) {
+      throw new ValidationError('An admin adjustment requires a written reason', {
+        reason: ['errors.field.required'],
+      })
+    }
+
+    const idempotencyKey = adminAdjustKey(input.auditLogId)
+    const tagged = `ADMIN_ADJUST:${reason}`
+
+    return input.amount >= 0
+      ? this.credit({
+          holder: input.holder,
+          asset: input.asset,
+          amount: input.amount,
+          kind: 'ADMIN_ADJUST',
+          idempotencyKey,
+          reason: tagged,
+          refKind: 'admin_audit',
+          refId: input.auditLogId,
+        })
+      : this.debit({
+          holder: input.holder,
+          asset: input.asset,
+          amount: -input.amount,
+          kind: 'ADMIN_ADJUST',
+          idempotencyKey,
+          reason: tagged,
+          refKind: 'admin_audit',
+          refId: input.auditLogId,
+          // An operator clawing back an erroneous credit must be able to, even
+          // if the holder has already spent some of it. The ledger stays true;
+          // the balance is allowed to go negative and be visible as such.
+          allowOverdraft: true,
+        })
   }
 
   /** The cached column — the fast read every screen uses. */
@@ -337,6 +559,37 @@ export class WalletService {
       countsTowardMatchCap: MATCH_KINDS.includes(input.kind),
       ...(input.capMultiplier === undefined ? {} : { multiplier: input.capMultiplier }),
     })
+  }
+
+  /**
+   * ★ Guests cannot spend — 10 §2.2, §2.5.
+   *
+   * This is not a UI rule with a service check behind it; it is the *only*
+   * check, and it removes a whole class of attack rather than one exploit: a
+   * guest session that could convert farmed provisional coins into anything
+   * before signing up would make guest sessions a coin faucet with an exit,
+   * and the vesting cap (10 §3.4) would bound nothing.
+   *
+   * `403`, not `409`: spending needs an account, and "refresh and retry" is
+   * advice a guest can never act on. Same reasoning as `requireUser` (S13).
+   */
+  private assertSpendable(input: DebitInput): void {
+    if (!Number.isInteger(input.amount) || input.amount <= 0) {
+      throw new ValidationError('A debit must be a positive whole number', {
+        amount: ['errors.field.invalid'],
+      })
+    }
+    if (input.holder.kind === 'guest' && input.allowOverdraft !== true) {
+      throw new ForbiddenError('Guests cannot spend', {
+        i18nKey: 'errors.guestCannotSpend',
+        holder: holderKey(input.holder),
+      })
+    }
+    if (input.idempotencyKey.length === 0) {
+      throw new ValidationError('A debit needs a derived idempotency key', {
+        idempotencyKey: ['errors.field.required'],
+      })
+    }
   }
 
   /**

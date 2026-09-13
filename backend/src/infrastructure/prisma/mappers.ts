@@ -10,10 +10,13 @@ import type {
   GameEventKind,
   GameInstanceStatus,
   Locale,
+  MatchReason,
   MemberRole,
   NumeralSystem,
+  SeatOutcome,
   SecurityEventKind,
   SecuritySeverity,
+  SubscriptionStatus,
   TableOrigin,
   TableStatus,
   Theme,
@@ -26,6 +29,7 @@ import type { TurnEnforcement } from '../../contracts/dto/turnEnforcement.js'
 import type {
   PlacementTable,
   RewardRule,
+  Subscription,
   Wallet,
   WalletTransaction,
 } from '../../domain/entities/economy.js'
@@ -33,6 +37,8 @@ import type {
   GameEvent,
   GameInstance,
   GameSnapshot,
+  MatchParticipant,
+  MatchResult,
   SeatAssignment,
 } from '../../domain/entities/game.js'
 import type { ChatMessage, Invite, Table, TableMember } from '../../domain/entities/table.js'
@@ -227,4 +233,25 @@ export function toRewardRule(row: Rows.RewardRule): RewardRule {
     placement: parseJson<PlacementTable>(placementJson),
     repeatDecay: parseJson<number[]>(repeatDecayJson),
   }
+}
+
+export function toMatchResult(row: Rows.MatchResult): MatchResult {
+  const { summaryJson, ...rest } = row
+  return {
+    ...rest,
+    reason: row.reason as MatchReason,
+    summary: parseJson<Record<string, unknown>>(summaryJson),
+  }
+}
+
+export function toMatchParticipant(row: Rows.MatchParticipant): MatchParticipant {
+  return {
+    ...row,
+    seat: row.seat as SeatId,
+    outcome: row.outcome as SeatOutcome,
+  }
+}
+
+export function toSubscription(row: Rows.Subscription): Subscription {
+  return { ...row, status: row.status as SubscriptionStatus }
 }

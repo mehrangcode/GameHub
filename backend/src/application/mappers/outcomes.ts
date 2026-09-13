@@ -59,6 +59,19 @@ export function seatOutcomeOf(member: TableMember, events: readonly GameEvent[] 
  * S35 consumes this as `integrityFactor`. Declared here, next to the outcome it
  * belongs to, so the two cannot drift into disagreeing about what an ejection
  * costs.
+ *
+ * ### The two values that are not 0 or 1
+ *
+ * **`RESIGNED` is 0.25** (10 §5.2 rule 2), corrected at S35 — it returned 1
+ * when this function shipped at S33, which nothing consumed yet. Conceding a
+ * lost position promptly is *courteous*: it gives the other players their
+ * evening back. Vanishing mid-hand and forcing a bot substitution is not, and
+ * the gap between 0.25 and 0 is exactly how much that difference is worth.
+ *
+ * **`KICKED` is 1**, against 10 §5.1's own table, and deliberately: a host or
+ * an admin removing somebody is *platform-initiated*, and forfeiture exists to
+ * punish idling, not operations (12 A8). A player kicked from a table they were
+ * playing properly keeps what they earned.
  */
 export function integrityFactorOf(outcome: SeatOutcome): number {
   switch (outcome) {
@@ -69,6 +82,7 @@ export function integrityFactorOf(outcome: SeatOutcome): number {
     case 'REPLACED_RETURNED':
       return 0.5
     case 'RESIGNED':
+      return 0.25
     case 'KICKED':
     case 'COMPLETED':
       return 1

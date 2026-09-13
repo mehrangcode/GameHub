@@ -1,4 +1,9 @@
-import type { AssetCode, TransactionKind, WalletStatus } from '../../contracts/enums.js'
+import type {
+  AssetCode,
+  SubscriptionStatus,
+  TransactionKind,
+  WalletStatus,
+} from '../../contracts/enums.js'
 
 /**
  * E1 — `balance` is a **cache**. The truth is `Σ WalletTransaction.amount`, and
@@ -70,5 +75,35 @@ export interface RewardRule {
   readonly capMatchesPerDay: number
   readonly guestVestCap: number
   readonly active: boolean
+  readonly updatedAt: Date
+}
+
+/**
+ * The premium subscription — 10 §6, 03 §3.9.
+ *
+ * **No card data ever reaches this database.** The provider holds it; we store
+ * a customer id and a subscription id, and nothing else about the payment.
+ *
+ * Read at M0 by `RewardService` for the 1.5× earn multiplier (§6.1), written
+ * only from M7 when the payment integration lands. Reading a row is not
+ * payment code: there is no checkout, no webhook and no provider SDK before
+ * M7 — only a column that says whether the perks are currently live.
+ */
+export interface Subscription {
+  readonly id: string
+  readonly userId: string
+  readonly tier: string
+  readonly status: SubscriptionStatus
+  readonly provider: string
+  readonly providerCustomerId: string | null
+  readonly providerSubId: string | null
+  readonly interval: string
+  readonly currentPeriodStart: Date | null
+  readonly currentPeriodEnd: Date | null
+  readonly cancelAtPeriodEnd: boolean
+  readonly canceledAt: Date | null
+  /** ★ 10 §6.3 — perks continue for three days after a failed payment. */
+  readonly graceEndsAt: Date | null
+  readonly createdAt: Date
   readonly updatedAt: Date
 }

@@ -127,6 +127,33 @@ export const COUNTERS = [
   'bot_moves_applied',
   'seats_reclaimed',
   'seats_abandoned',
+
+  // Phase I — rewards. Three of these are worth reading against each other:
+  //
+  //   `rewards_forfeited` against `matches_settled` is how often the anti-AFK
+  //   rule actually bites. A number close to zero means turn enforcement is
+  //   doing its job before it has to; a number that climbs means something
+  //   about the timers or the game length is wrong.
+  //
+  //   `settlements_replayed` is the match-level half of E2 working: a finish
+  //   that arrived twice and paid once. It should be small and non-zero —
+  //   permanently zero probably means the idempotent path stopped being
+  //   exercised, not that retries stopped happening.
+  //
+  //   `reward_decay_applied` is §3.5 firing. On a platform of friends playing
+  //   long games it should stay near zero; a spike is either a farming run or
+  //   a matchup signature that is too coarse.
+  'matches_settled',
+  'settlements_replayed',
+  'rewards_paid',
+  'rewards_forfeited',
+  'reward_decay_applied',
+  'premium_multiplier_applied',
+  'wallet_debits',
+  'wallet_debits_refused',
+  'guest_forfeits',
+  'reconciliations_run',
+  'reconciliation_drift_detected',
 ] as const
 
 /** Point-in-time values that go up and down. */

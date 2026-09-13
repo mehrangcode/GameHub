@@ -2,6 +2,7 @@ import type { IUnitOfWork, Repositories } from '../../src/domain/repositories/Re
 import {
   InMemoryCosmeticRepository,
   InMemoryRewardRuleRepository,
+  InMemorySubscriptionRepository,
   InMemoryWalletRepository,
 } from './economy.js'
 import {
@@ -10,7 +11,10 @@ import {
   InMemoryGameSnapshotRepository,
   InMemoryStatsRepository,
 } from './games.js'
-import { InMemoryMatchParticipantRepository } from './matches.js'
+import {
+  InMemoryMatchParticipantRepository,
+  InMemoryMatchResultRepository,
+} from './matches.js'
 import {
   InMemoryGuestSessionRepository,
   InMemoryPreferencesRepository,
@@ -39,7 +43,8 @@ export interface InMemoryRepositories extends Repositories {
   readonly cosmetics: InMemoryCosmeticRepository
   readonly wallets: InMemoryWalletRepository
   readonly rewardRules: InMemoryRewardRuleRepository
-  /** Exposed concretely because rows can only be seeded directly (no `create`). */
+  readonly subscriptions: InMemorySubscriptionRepository
+  readonly matchResults: InMemoryMatchResultRepository
   readonly participants: InMemoryMatchParticipantRepository
   readonly chat: InMemoryChatRepository
 }
@@ -57,9 +62,14 @@ export function buildInMemoryRepositories(): InMemoryRepositories {
   const invites = new InMemoryInviteRepository()
   const games = new InMemoryGameInstanceRepository()
   const events = new InMemoryGameEventRepository()
+  const matchResults = new InMemoryMatchResultRepository()
+  const participants = new InMemoryMatchParticipantRepository()
 
   tables.invites = invites
   events.games = games
+  // §3.5's repeat-decay lookup joins results to participants, exactly as the
+  // Prisma version reaches across two tables.
+  matchResults.participants = participants
 
   return {
     users: new InMemoryUserRepository(),
@@ -74,9 +84,11 @@ export function buildInMemoryRepositories(): InMemoryRepositories {
     events,
     snapshots: new InMemoryGameSnapshotRepository(),
     stats: new InMemoryStatsRepository(),
-    participants: new InMemoryMatchParticipantRepository(),
+    matchResults,
+    participants,
     wallets: new InMemoryWalletRepository(),
     rewardRules: new InMemoryRewardRuleRepository(),
+    subscriptions: new InMemorySubscriptionRepository(),
     cosmetics: new InMemoryCosmeticRepository(),
   }
 }

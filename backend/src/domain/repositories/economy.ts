@@ -1,5 +1,5 @@
 import type { AssetCode, TransactionKind, UnlockKind } from '../../contracts/enums.js'
-import type { RewardRule, Wallet, WalletTransaction } from '../entities/economy.js'
+import type { RewardRule, Subscription, Wallet, WalletTransaction } from '../entities/economy.js'
 import type { CosmeticItem, UserCosmetic } from '../entities/user.js'
 import type { IdentityRef } from '../value-objects/identity.js'
 import type { Draft, PageQuery } from './IRepository.js'
@@ -84,7 +84,68 @@ export interface IWalletRepository {
 
   /** Guest vesting: the provisional wallet becomes spendable (10 §3.4). */
   markVested(walletId: string): Promise<Wallet>
+
+  /**
+   * ★ The debit path's row-locked read — 10 §2.5, S38.
+   *
+   * `SELECT … FOR UPDATE` on PostgreSQL; on SQLite the statement is a no-op
+   * because the engine serializes writers anyway, so the *property* holds on
+   * both and only the mechanism differs. Two simultaneous purchases with one
+   * item's worth of coins must not both pass the balance check: a plain read
+   * followed by a write is a real double-spend, not a theoretical one.
+   *
+   * Only meaningful **inside** a transaction — the lock is released at commit.
+   */
+  balanceForUpdate(walletId: string): Promise<number>
+
+  /**
+   * Every wallet, a page at a time, ordered by `id` — the nightly
+   * reconciliation (E1, S38).
+   *
+   * Paged rather than `findMany()` because this is the one query in the
+   * codebase whose result set grows with the whole user base, and a job that
+   * loads every wallet into memory stops working on precisely the day the
+   * platform starts mattering.
+   */
+  listPaged(afterId: string | null, limit: number): Promise<Wallet[]>
 }
+
+/**
+ * Premium, read-only at M0 — 10 §6.
+ *
+ * There is exactly one consumer before M7: the 1.5× earn multiplier in
+ * `RewardService`. The write side (checkout, webhooks, provider ids) belongs to
+ * M7 and is deliberately absent, so nothing here can grow into payment code by
+ * accident. `upsert` exists because a test — and, later, the admin console —
+ * needs to be able to say "this account is a subscriber" without a Stripe
+ * account existing.
+ */
+export interface ISubscriptionRepository {
+  findByUser(userId: string): Promise<Subscription | null>
+  /**
+   * ★ Is premium *live* right now? Includes `PAST_DUE` inside `graceEndsAt`,
+   * per 10 §6.3: perks continue for three days after a failed payment, because
+   * a declined card is usually an expired one and taking the perks away the
+   * same hour punishes the wrong thing.
+   */
+  findActive(userId: string, now: Date): Promise<Subscription | null>
+  upsert(userId: string, data: NewSubscription): Promise<Subscription>
+}
+
+export type NewSubscription = Draft<
+  Subscription,
+  | 'tier'
+  | 'provider'
+  | 'providerCustomerId'
+  | 'providerSubId'
+  | 'interval'
+  | 'currentPeriodStart'
+  | 'currentPeriodEnd'
+  | 'cancelAtPeriodEnd'
+  | 'canceledAt'
+  | 'graceEndsAt'
+>
+
 
 /** `updatedAt` is the database's; everything else is the operator's. */
 export type NewRewardRule = Draft<RewardRule, 'active'>

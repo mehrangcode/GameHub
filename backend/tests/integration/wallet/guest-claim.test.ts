@@ -400,17 +400,17 @@ describe('POST /auth/guest/claim — the happy path', () => {
     await seatGuest(session.id)
     await grantProvisional(session.id, 120)
 
-    // Exactly the two reads the S22 verify step makes by hand, through the
-    // dev-only window that stands in for S37's `GET /wallet`.
-    const before = await request(app).get('/api/v1/_probe/wallet').set('Cookie', cookie)
+    // Exactly the two reads the S22 verify step makes by hand. They went
+    // through the dev-only `/_probe/wallet` until S37; that route is gone and
+    // these now hit the real `GET /wallet`, which is the point of having it.
+    const before = await request(app).get('/api/v1/wallet').set('Cookie', cookie)
     expect(before.body.balances).toEqual([
       { asset: 'COIN', balance: 120, status: 'PROVISIONAL', lifetimeEarned: 120, lifetimeSpent: 0 },
     ])
 
     const res = await claim(cookie, credentials)
-    const after = await request(app)
-      .get('/api/v1/_probe/wallet')
-      .set('Cookie', cookieOf(res, AUTH_COOKIES.access))
+    const accessCookie = cookieOf(res, AUTH_COOKIES.access)
+    const after = await request(app).get('/api/v1/wallet').set('Cookie', accessCookie)
 
     expect(after.body.balances).toContainEqual(
       expect.objectContaining({ asset: 'COIN', balance: 120, status: 'VESTED' }),
@@ -421,7 +421,13 @@ describe('POST /auth/guest/claim — the happy path', () => {
       'GEM',
       'TICKET',
     ])
-    expect(after.body.transactions[0]).toMatchObject({
+
+    // And the statement — a user's route, which the guest half of this journey
+    // deliberately cannot reach.
+    const statement = await request(app)
+      .get('/api/v1/wallet/transactions')
+      .set('Cookie', accessCookie)
+    expect(statement.body.items[0]).toMatchObject({
       kind: 'GUEST_VEST',
       amount: 120,
       balanceAfter: 120,
