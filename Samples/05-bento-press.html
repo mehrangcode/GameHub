@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="en" dir="ltr" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>05 — Bento Press</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Vazirmatn:wght@400;500;600;800&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   DESIGN TOKENS — direction 05 "Bento Press"
+   Flat, high-contrast, warm paper. No shadows at all: hierarchy comes from
+   2px rules, flat colour blocks and a real size jump in the type scale.
+   The only direction that also changes the LAYOUT — an asymmetric bento grid
+   instead of a banner-plus-rows stack.
+   Cheapest to render, hardest to make feel warm, ages the best.
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root {
+  --color-bg:              #F6F2EA;
+  --color-surface:         #FFFDF9;
+  --color-surface-raised:  #FFFDF9;
+  --color-surface-sunken:  #EDE7DA;
+  --color-border:          #1A1712;
+  --color-border-strong:   #1A1712;
+  --color-text:            #1A1712;
+  --color-text-muted:      #6C6355;
+
+  --color-primary:         #1A1712;   /* ink IS the primary — colour is data  */
+  --color-primary-hover:   #000000;
+  --color-primary-soft:    #EDE7DA;
+  --color-on-primary:      #FFFDF9;
+  --color-accent:          #E5482F;   /* one loud vermilion, used sparingly   */
+  --color-accent-soft:     #FBE3DE;
+  --color-on-accent:       #FFFDF9;
+
+  --color-success:#1D6B3E; --color-success-soft:#DDEEE3;
+  --color-danger:#B32419;  --color-danger-soft:#FAE0DD;
+  --color-warning:#8A5A00; --color-warning-soft:#F7EBD4;
+  --color-neutral-soft:#EDE7DA;
+
+  --color-coin:#8A6A00; --color-gem:#1F5E8A; --color-ticket:#8A2760;
+
+  --seat-ring-active: var(--color-accent);
+  --seat-ring-idle:   var(--color-border);
+  --timer-ok:#1D6B3E; --timer-warn:#8A5A00; --timer-danger:#B32419;
+
+  --font-display:'Space Grotesk','Vazirmatn',system-ui,sans-serif;
+  --font-body:'Inter','Vazirmatn',system-ui,sans-serif;
+  --font-numeric:'Space Grotesk',ui-monospace,monospace;
+  --text-xs:.75rem; --text-sm:.8125rem; --text-base:.9375rem;
+  --text-md:1.0625rem; --text-lg:1.375rem; --text-xl:2rem;
+  --text-2xl:2.75rem; --text-3xl:4rem;
+  --leading-tight:1.05; --leading-body:1.6;
+
+  --space-1:.25rem; --space-2:.5rem; --space-3:.75rem; --space-4:1rem;
+  --space-5:1.5rem; --space-6:2rem; --space-7:2.5rem; --space-8:3.5rem;
+
+  --radius-sm:2px; --radius-md:3px; --radius-lg:4px; --radius-full:999px;
+
+  /* there are no shadows in this system — the tokens exist so the contract
+     holds, and they resolve to nothing. Depth is a 2px rule. */
+  --shadow-1: none; --shadow-2: none; --shadow-3: none;
+  --rule: 2px solid var(--color-border);
+
+  --dur-fast:90ms; --dur-base:150ms; --dur-slow:240ms;
+  --ease: cubic-bezier(.3,.7,.4,1);
+  --focus-ring: 0 0 0 2px var(--color-bg), 0 0 0 5px var(--color-accent);
+  --max-width:1280px;
+}
+
+:root[data-theme="dark"] {
+  --color-bg:#13110E; --color-surface:#1B1815; --color-surface-raised:#1B1815;
+  --color-surface-sunken:#0D0B09; --color-border:#F2EDE3; --color-border-strong:#F2EDE3;
+  --color-text:#F2EDE3; --color-text-muted:#A79D8C;
+  --color-primary:#F2EDE3; --color-primary-hover:#FFFFFF; --color-primary-soft:#2A2621; --color-on-primary:#13110E;
+  --color-accent:#FF6A4D; --color-accent-soft:#33150F; --color-on-accent:#13110E;
+  --color-success:#5FC886; --color-success-soft:#12271A;
+  --color-danger:#FF7B6B;  --color-danger-soft:#2E1512;
+  --color-warning:#E0A83C; --color-warning-soft:#2C2211;
+  --color-neutral-soft:#2A2621;
+  --color-coin:#E0B23C; --color-gem:#6FB3DC; --color-ticket:#DE80B0;
+  --timer-ok:#5FC886; --timer-warn:#E0A83C; --timer-danger:#FF7B6B;
+}
+
+/* ═══ reset + base ═══════════════════════════════════════════════════════ */
+*,*::before,*::after{box-sizing:border-box} *{margin:0}
+html{color-scheme:light dark;-webkit-text-size-adjust:100%}
+:root[data-theme="dark"]{color-scheme:dark}
+body{background:var(--color-bg);color:var(--color-text);font-family:var(--font-body);font-size:var(--text-base);line-height:var(--leading-body);min-block-size:100dvh;transition:background var(--dur-base) var(--ease),color var(--dur-base) var(--ease)}
+html[dir="rtl"] body{font-family:'Vazirmatn',var(--font-body)}
+img,svg{display:block;max-inline-size:100%}
+button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
+:where(a,button,[tabindex]):focus-visible{outline:none;box-shadow:var(--focus-ring)}
+h1,h2,h3{font-family:var(--font-display);line-height:var(--leading-tight);font-weight:700;letter-spacing:-.03em}
+html[dir="rtl"] h1,html[dir="rtl"] h2,html[dir="rtl"] h3{font-family:'Vazirmatn';font-weight:800;letter-spacing:normal}
+.num{font-variant-numeric:tabular-nums;font-family:var(--font-numeric)}
+.skip{position:absolute;inset-block-start:-100px;inset-inline-start:var(--space-4);z-index:100;background:var(--color-accent);color:var(--color-on-accent);padding:var(--space-3) var(--space-4)}
+.skip:focus{inset-block-start:var(--space-4)}
+.icon{inline-size:1.25em;block-size:1.25em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.ic-s{inline-size:1em;block-size:1em}
+.kicker{font-size:var(--text-xs);font-weight:700;letter-spacing:.14em;text-transform:uppercase}
+html[dir="rtl"] .kicker{letter-spacing:normal;text-transform:none}
+
+/* ═══ top bar ════════════════════════════════════════════════════════════ */
+.topbar{position:sticky;inset-block-start:0;z-index:30;background:var(--color-bg);border-block-end:var(--rule)}
+.topbar__inner{max-inline-size:var(--max-width);margin-inline:auto;padding:var(--space-3) var(--space-5);display:flex;align-items:center;gap:var(--space-5)}
+.brand{display:flex;align-items:center;gap:var(--space-3);font-family:var(--font-display);font-weight:700;font-size:var(--text-md);letter-spacing:-.04em;text-transform:uppercase}
+html[dir="rtl"] .brand{text-transform:none;letter-spacing:normal}
+.brand__mark{inline-size:34px;block-size:34px;background:var(--color-accent);color:var(--color-on-accent);display:grid;place-items:center}
+.nav{display:flex;gap:0;margin-inline-start:var(--space-4)}
+.nav a{padding:var(--space-2) var(--space-4);color:var(--color-text-muted);text-decoration:none;font-weight:600;font-size:var(--text-sm);text-transform:uppercase;letter-spacing:.07em;min-block-size:40px;display:inline-flex;align-items:center;border-block-end:3px solid transparent;transition:all var(--dur-fast) var(--ease)}
+html[dir="rtl"] .nav a{text-transform:none;letter-spacing:normal}
+.nav a:hover{color:var(--color-text)}
+.nav a[aria-current="page"]{color:var(--color-text);border-block-end-color:var(--color-accent)}
+.topbar__end{margin-inline-start:auto;display:flex;align-items:center;gap:var(--space-2)}
+.purse{display:flex;align-items:center;gap:var(--space-4);padding:var(--space-2) var(--space-4);border:var(--rule)}
+.purse__item{display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-sm);font-weight:700}
+.purse__item[data-kind="coin"]{color:var(--color-coin)}.purse__item[data-kind="gem"]{color:var(--color-gem)}.purse__item[data-kind="ticket"]{color:var(--color-ticket)}
+.ghost-btn{inline-size:40px;block-size:40px;display:grid;place-items:center;color:var(--color-text-muted);border:2px solid transparent;transition:all var(--dur-fast) var(--ease)}
+.ghost-btn:hover{border-color:var(--color-border);color:var(--color-text)}
+.ghost-btn--text{inline-size:auto;padding-inline:var(--space-3);font-weight:700;font-size:var(--text-sm)}
+.avatar{position:relative;inline-size:38px;block-size:38px;background:var(--color-primary-soft);color:var(--color-text);display:grid;place-items:center;font-weight:700;font-size:var(--text-sm);border:var(--rule)}
+.avatar__dot{position:absolute;inset-block-end:-3px;inset-inline-end:-3px;inline-size:10px;block-size:10px;border:2px solid var(--color-bg)}
+.avatar__dot[data-state="online"]{background:var(--color-success)}
+.avatar__dot[data-state="disconnected"]{background:var(--color-warning)}
+
+/* ═══ BENTO layout — this direction's actual differentiator ══════════════ */
+.page{max-inline-size:var(--max-width);margin-inline:auto;padding:var(--space-6) var(--space-5) var(--space-8);display:grid;gap:var(--space-5)}
+.bento{display:grid;gap:var(--space-4);grid-template-columns:repeat(2,minmax(0,1fr))}
+@media (min-width:900px){ .bento{grid-template-columns:repeat(4,minmax(0,1fr))} }
+.cell{border:var(--rule);background:var(--color-surface);padding:var(--space-5);display:grid;align-content:start;gap:var(--space-2)}
+.cell--wide{grid-column:span 2}
+@media (min-width:900px){ .cell--hero{grid-column:span 3;grid-row:span 2} .cell--tall{grid-row:span 2} }
+.cell--ink{background:var(--color-primary);color:var(--color-on-primary);border-color:var(--color-primary)}
+.cell--ink .cell__k{color:color-mix(in srgb,var(--color-on-primary) 66%,transparent)}
+.cell--fire{background:var(--color-accent);color:var(--color-on-accent);border-color:var(--color-accent)}
+.cell--fire .cell__k{color:color-mix(in srgb,var(--color-on-accent) 70%,transparent)}
+.cell__k{font-size:var(--text-xs);font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--color-text-muted)}
+html[dir="rtl"] .cell__k{letter-spacing:normal;text-transform:none}
+.cell__v{font-family:var(--font-display);font-size:var(--text-2xl);font-weight:700;letter-spacing:-.04em;font-variant-numeric:tabular-nums;line-height:1}
+.cell__d{font-size:var(--text-xs);color:inherit;opacity:.72}
+
+/* ── hero cell: the live table ─────────────────────────────────────────── */
+.hero{display:grid;gap:var(--space-5);align-content:space-between}
+.hero__head{display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap}
+.hero__live{display:inline-flex;align-items:center;gap:var(--space-2);background:var(--color-accent);color:var(--color-on-accent);padding:2px var(--space-3);font-size:var(--text-xs);font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+html[dir="rtl"] .hero__live{letter-spacing:normal;text-transform:none}
+.hero h1{font-size:var(--text-xl);margin-block-start:var(--space-3)}
+@media (min-width:900px){ .hero h1{font-size:var(--text-3xl)} }
+.hero__meta{color:var(--color-text-muted);font-size:var(--text-sm)}
+.hero__grid{display:grid;gap:var(--space-4)}
+@media (min-width:640px){ .hero__grid{grid-template-columns:minmax(0,1fr) auto;align-items:end} }
+.seats{display:flex;gap:var(--space-2);flex-wrap:wrap}
+.seat{display:flex;align-items:center;gap:var(--space-2);padding:var(--space-2) var(--space-3);border:2px solid var(--color-border);font-size:var(--text-sm)}
+.seat__pic{inline-size:26px;block-size:26px;display:grid;place-items:center;font-size:var(--text-xs);font-weight:700;background:var(--color-neutral-soft);color:var(--color-text)}
+.seat[data-turn="true"]{background:var(--color-accent);color:var(--color-on-accent);border-color:var(--color-accent)}
+.seat[data-turn="true"] .seat__pic{background:var(--color-on-accent);color:var(--color-accent)}
+.seat__tag{font-size:10px;font-weight:700;padding:1px var(--space-2);text-transform:uppercase;letter-spacing:.05em}
+html[dir="rtl"] .seat__tag{text-transform:none;letter-spacing:normal}
+.seat__tag[data-kind="bot"]{background:var(--color-neutral-soft);color:var(--color-text-muted)}
+.seat__tag[data-kind="strike"],.seat__tag[data-kind="recon"]{background:var(--color-warning-soft);color:var(--color-warning)}
+.hero__act{display:flex;align-items:center;gap:var(--space-4)}
+.timer{position:relative;inline-size:84px;block-size:84px;display:grid;place-items:center;flex:none}
+.timer svg{position:absolute;inset:0;inline-size:100%;block-size:100%;transform:rotate(-90deg)}
+html[dir="rtl"] .timer svg{transform:rotate(-90deg) scaleY(-1)}
+.timer__track{stroke:var(--color-neutral-soft);stroke-width:8;fill:none}
+.timer__fill{stroke:var(--timer-warn);stroke-width:8;fill:none;stroke-linecap:butt;transition:stroke-dashoffset 1s linear,stroke var(--dur-base)}
+.timer__val{font-family:var(--font-display);font-size:var(--text-md);font-weight:700;font-variant-numeric:tabular-nums}
+.timer__cap{font-size:9px;color:var(--color-text-muted);letter-spacing:.08em;text-transform:uppercase}
+html[dir="rtl"] .timer__cap{letter-spacing:normal;text-transform:none}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--space-2);min-block-size:46px;padding-inline:var(--space-5);font-weight:700;font-size:var(--text-sm);text-transform:uppercase;letter-spacing:.07em;border:var(--rule);transition:all var(--dur-fast) var(--ease);white-space:nowrap}
+html[dir="rtl"] .btn{text-transform:none;letter-spacing:normal}
+.btn--primary{background:var(--color-accent);color:var(--color-on-accent);border-color:var(--color-accent)}
+.btn--primary:hover{background:var(--color-primary);border-color:var(--color-primary);color:var(--color-on-primary)}
+.btn--quiet{background:transparent;color:var(--color-text)}
+.btn--quiet:hover{background:var(--color-primary);color:var(--color-on-primary)}
+.btn--block{inline-size:100%}
+
+/* ── sections ──────────────────────────────────────────────────────────── */
+.section__head{display:flex;align-items:baseline;gap:var(--space-3);padding-block-end:var(--space-3);margin-block-end:var(--space-4);border-block-end:var(--rule)}
+.section__head h2{font-size:var(--text-lg)}
+.section__count{font-size:var(--text-sm);color:var(--color-text-muted)}
+.section__link{margin-inline-start:auto;font-size:var(--text-sm);font-weight:700;color:var(--color-text);text-decoration:underline;text-underline-offset:3px}
+.cols{display:grid;gap:var(--space-6);grid-template-columns:minmax(0,1fr)}
+@media (min-width:1024px){.cols{grid-template-columns:minmax(0,1fr) 300px}}
+
+/* ── games ─────────────────────────────────────────────────────────────── */
+.games{display:grid;gap:var(--space-4);grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
+.game{border:var(--rule);background:var(--color-surface);padding:var(--space-5);display:grid;gap:var(--space-3);align-content:start;text-decoration:none;color:inherit;transition:all var(--dur-fast) var(--ease)}
+.game:hover{background:var(--color-primary);color:var(--color-on-primary)}
+.game:hover .game__tag,.game:hover .game__facts,.game:hover .game__fact{color:color-mix(in srgb,var(--color-on-primary) 72%,transparent)}
+.game:hover .game__icon{background:var(--color-on-primary);color:var(--color-primary)}
+.game:hover .game__rate{color:var(--color-accent)}
+.game[aria-disabled="true"]{opacity:.42;pointer-events:none}
+.game__top{display:flex;align-items:flex-start;gap:var(--space-3)}
+.game__icon{inline-size:42px;block-size:42px;display:grid;place-items:center;background:var(--color-neutral-soft);color:var(--color-text);transition:all var(--dur-fast) var(--ease)}
+.game--star .game__icon{background:var(--color-accent);color:var(--color-on-accent)}
+.game__name{font-family:var(--font-display);font-weight:700;font-size:var(--text-md);letter-spacing:-.02em}
+html[dir="rtl"] .game__name{font-family:'Vazirmatn';font-weight:800;letter-spacing:normal}
+.game__tag{font-size:var(--text-sm);color:var(--color-text-muted)}
+.badge{font-size:10px;font-weight:700;padding:2px var(--space-2);text-transform:uppercase;letter-spacing:.08em;white-space:nowrap}
+html[dir="rtl"] .badge{text-transform:none;letter-spacing:normal}
+.badge--star{background:var(--color-accent);color:var(--color-on-accent)}
+.badge--soon{background:var(--color-neutral-soft);color:var(--color-text-muted)}
+.game__facts{display:flex;flex-wrap:wrap;gap:var(--space-2) var(--space-4);font-size:var(--text-xs);color:var(--color-text-muted);padding-block-start:var(--space-3);border-block-start:1px solid currentColor}
+.game__fact{display:inline-flex;align-items:center;gap:var(--space-1)}
+.game__rate{color:var(--color-coin);font-weight:700}
+
+/* ── rail ──────────────────────────────────────────────────────────────── */
+.rail{display:grid;gap:var(--space-5);align-content:start}
+.rail__card{border:var(--rule);background:var(--color-surface);padding:var(--space-5)}
+.friend{display:flex;align-items:center;gap:var(--space-3);padding-block:var(--space-3);border-block-end:1px solid var(--color-neutral-soft)}
+.friend:last-of-type{border-block-end:0}
+.friend__n{font-weight:600}
+.friend__s{font-size:var(--text-xs);color:var(--color-text-muted)}
+.friend__act{margin-inline-start:auto;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;border:2px solid var(--color-border);padding:var(--space-2) var(--space-3)}
+html[dir="rtl"] .friend__act{text-transform:none;letter-spacing:normal}
+.friend__act:hover{background:var(--color-primary);color:var(--color-on-primary)}
+.invite{border:2px dashed var(--color-border);padding:var(--space-4);display:grid;gap:var(--space-3)}
+.invite__code{font-family:var(--font-display);font-size:var(--text-xl);font-weight:700;letter-spacing:.1em;text-align:center}
+html[dir="rtl"] .invite__code{direction:ltr}
+
+/* ── matches ───────────────────────────────────────────────────────────── */
+.matches{border:var(--rule);background:var(--color-surface)}
+.match{display:grid;gap:var(--space-2) var(--space-4);grid-template-columns:36px minmax(0,1fr) auto;align-items:center;padding:var(--space-4) var(--space-5);border-block-end:1px solid var(--color-neutral-soft)}
+.match:last-child{border-block-end:0}
+.match__icon{inline-size:36px;block-size:36px;display:grid;place-items:center;background:var(--color-neutral-soft);color:var(--color-text)}
+.match__name{font-weight:700}
+.match__meta{font-size:var(--text-xs);color:var(--color-text-muted);display:flex;gap:var(--space-3);flex-wrap:wrap}
+.match__pay{text-align:end;display:grid;gap:2px;justify-items:end}
+.match__coins{font-family:var(--font-display);font-weight:700;font-variant-numeric:tabular-nums;font-size:var(--text-md);display:inline-flex;align-items:center;gap:var(--space-1)}
+.match__coins[data-paid="yes"]{color:var(--color-coin)}.match__coins[data-paid="no"]{color:var(--color-text-muted)}
+.pill{font-size:10px;font-weight:700;padding:2px var(--space-2);text-transform:uppercase;letter-spacing:.06em}
+html[dir="rtl"] .pill{text-transform:none;letter-spacing:normal}
+.pill--won{background:var(--color-success-soft);color:var(--color-success)}
+.pill--lost{background:var(--color-neutral-soft);color:var(--color-text-muted)}
+.pill--forfeit{background:var(--color-danger);color:var(--color-on-accent)}
+.forfeit-note{grid-column:1/-1;display:flex;gap:var(--space-3);align-items:flex-start;padding:var(--space-4);margin-block-start:var(--space-2);border:2px solid var(--color-danger);background:var(--color-danger-soft);font-size:var(--text-sm)}
+.forfeit-note .icon{color:var(--color-danger);margin-block-start:2px}
+.forfeit-note a{color:var(--color-danger);font-weight:700;text-underline-offset:3px}
+.footnote{text-align:center;color:var(--color-text-muted);font-size:var(--text-xs);padding-block-start:var(--space-4)}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important}}
+</style>
+</head>
+<body>
+
+<svg style="display:none" aria-hidden="true"><defs>
+<symbol id="i-spade" viewBox="0 0 24 24"><path d="M12 3c-3 3.5-7 6-7 9.5A4.5 4.5 0 0 0 12 16a4.5 4.5 0 0 0 7-3.5C19 9 15 6.5 12 3Z"/><path d="M12 16v5m-2.5 0h5"/></symbol>
+<symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+<symbol id="i-cards" viewBox="0 0 24 24"><rect x="3" y="5" width="11" height="15" rx="2"/><path d="M9 3h8a2 2 0 0 1 2 2v12"/></symbol>
+<symbol id="i-crown" viewBox="0 0 24 24"><path d="M3 7l4 4 5-7 5 7 4-4-2 12H5L3 7Z"/></symbol>
+<symbol id="i-chip" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/></symbol>
+<symbol id="i-knight" viewBox="0 0 24 24"><path d="M8 20h9M9 20c0-4 1-6 4-8 1.5-1 2-2.5 1.5-4L13 5l-2 2-3 1c-1.5.5-2 2-1 3l2-1 1 2-2 3"/></symbol>
+<symbol id="i-coin" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v9M14.5 9.5c0-1-1-1.5-2.5-1.5s-2.5.6-2.5 1.6 1 1.4 2.5 1.6 2.5.7 2.5 1.7-1 1.6-2.5 1.6-2.5-.6-2.5-1.6"/></symbol>
+<symbol id="i-gem" viewBox="0 0 24 24"><path d="M6 4h12l3 5-9 11L3 9l3-5Z"/><path d="M3 9h18M9 4l-2 5 5 11 5-11-2-5"/></symbol>
+<symbol id="i-ticket" viewBox="0 0 24 24"><path d="M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4V8Z"/><path d="M13 6v12"/></symbol>
+<symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5Z"/></symbol>
+<symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 9a6 6 0 1 0-12 0c0 6-2 7-2 7h16s-2-1-2-7"/><path d="M13.7 20a2 2 0 0 1-3.4 0"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5-12-7.5Z"/></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><path d="M16 20v-1.5a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4V20"/><circle cx="9" cy="7" r="3.5"/><path d="M22 20v-1.5a4 4 0 0 0-3-3.87"/><path d="M16 3.6a4 4 0 0 1 0 6.8"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+<symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+</defs></svg>
+
+<a class="skip" href="#main" data-en="Skip to content" data-fa="رفتن به محتوا">Skip to content</a>
+
+<header class="topbar">
+  <div class="topbar__inner">
+    <div class="brand"><span class="brand__mark"><svg class="icon" aria-hidden="true"><use href="#i-spade"/></svg></span><span>Template</span></div>
+    <nav class="nav" aria-label="Primary">
+      <a href="#" aria-current="page" data-en="Play" data-fa="بازی">Play</a>
+      <a href="#" data-en="Games" data-fa="بازی‌ها">Games</a>
+      <a href="#" data-en="Store" data-fa="فروشگاه">Store</a>
+      <a href="#" data-en="Customize" data-fa="شخصی‌سازی">Customize</a>
+    </nav>
+    <div class="topbar__end">
+      <div class="purse" aria-label="Wallet">
+        <span class="purse__item" data-kind="coin"><svg class="icon" aria-hidden="true"><use href="#i-coin"/></svg><span class="num">2,480</span></span>
+        <span class="purse__item" data-kind="gem"><svg class="icon" aria-hidden="true"><use href="#i-gem"/></svg><span class="num">12</span></span>
+        <span class="purse__item" data-kind="ticket"><svg class="icon" aria-hidden="true"><use href="#i-ticket"/></svg><span class="num">3</span></span>
+      </div>
+      <button class="ghost-btn ghost-btn--text" id="lang" aria-label="Switch language">فا</button>
+      <button class="ghost-btn" id="theme" aria-label="Toggle theme"><svg class="icon"><use href="#i-moon"/></svg></button>
+      <button class="ghost-btn" aria-label="Notifications"><svg class="icon"><use href="#i-bell"/></svg></button>
+      <div class="avatar">MG<span class="avatar__dot" data-state="online"></span></div>
+    </div>
+  </div>
+</header>
+
+<main id="main" class="page">
+
+  <!-- ── the bento ─────────────────────────────────────────────────────── -->
+  <section class="bento" aria-label="Your table and numbers">
+
+    <div class="cell cell--hero cell--wide hero" aria-labelledby="resume-h">
+      <div>
+        <div class="hero__head">
+          <span class="hero__live" data-en="Live" data-fa="زنده">Live</span>
+          <span class="kicker" style="color:var(--color-text-muted)" data-en="Round 3 of 7 · Team 1 leads 62–48" data-fa="دست ۳ از ۷ · تیم ۱ جلوتر است ۶۲–۴۸">Round 3 of 7 · Team 1 leads 62–48</span>
+        </div>
+        <h1 id="resume-h" data-en="Shelem" data-fa="شلم">Shelem</h1>
+        <p class="hero__meta" data-en="Hosted by Mehrang · four seats · 45 minutes in" data-fa="میزبان: مهرنگ · چهار صندلی · ۴۵ دقیقه گذشته">Hosted by Mehrang · four seats · 45 minutes in</p>
+      </div>
+      <div class="hero__grid">
+        <div class="seats">
+          <span class="seat" data-turn="true"><span class="seat__pic">MG</span><span data-en="You" data-fa="شما">You</span></span>
+          <span class="seat"><span class="seat__pic">SA</span>Sara<span class="seat__tag" data-kind="strike" data-en="1 / 2" data-fa="۱ از ۲">1 / 2</span></span>
+          <span class="seat"><span class="seat__pic">BT</span><span data-en="Seat 3" data-fa="صندلی ۳">Seat 3</span><span class="seat__tag" data-kind="bot" data-en="Bot" data-fa="ربات">Bot</span></span>
+          <span class="seat"><span class="seat__pic">RZ</span>Reza<span class="seat__tag" data-kind="recon" data-en="Recon" data-fa="اتصال">Recon</span></span>
+        </div>
+        <div class="hero__act">
+          <div class="timer" role="timer" aria-label="Turn deadline">
+            <svg viewBox="0 0 84 84"><circle class="timer__track" cx="42" cy="42" r="36"/><circle class="timer__fill" id="ring" cx="42" cy="42" r="36"/></svg>
+            <div style="text-align:center"><div class="timer__val" id="clock">0:23</div><div class="timer__cap" data-en="your turn" data-fa="نوبت شما">your turn</div></div>
+          </div>
+          <button class="btn btn--primary" data-en="Return to table" data-fa="بازگشت به میز">Return to table</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="cell cell--ink">
+      <span class="cell__k" data-en="Coin balance" data-fa="موجودی سکه">Coin balance</span>
+      <span class="cell__v">2,480</span>
+      <span class="cell__d"><span data-en="+340 this week" data-fa="‏+۳۴۰ این هفته">+340 this week</span></span>
+    </div>
+
+    <div class="cell">
+      <span class="cell__k" data-en="Win rate" data-fa="نرخ برد">Win rate</span>
+      <span class="cell__v">58%</span>
+      <span class="cell__d" style="color:var(--color-success)"><span data-en="+4 pts" data-fa="‏+۴ واحد">+4 pts</span></span>
+    </div>
+
+    <div class="cell">
+      <span class="cell__k" data-en="Matches" data-fa="بازی‌ها">Matches</span>
+      <span class="cell__v">146</span>
+      <span class="cell__d" data-en="9 this week" data-fa="۹ بازی این هفته">9 this week</span>
+    </div>
+
+    <div class="cell cell--fire">
+      <span class="cell__k" data-en="Streak" data-fa="برد پیاپی">Streak</span>
+      <span class="cell__v">3</span>
+      <span class="cell__d" data-en="best: 7" data-fa="بهترین: ۷">best: 7</span>
+    </div>
+
+  </section>
+
+  <div class="cols">
+    <div style="display:grid;gap:var(--space-6);min-inline-size:0">
+      <section aria-labelledby="games-h">
+        <div class="section__head">
+          <h2 id="games-h" data-en="Start a table" data-fa="یک میز بساز">Start a table</h2>
+          <span class="section__count" data-en="6 games" data-fa="۶ بازی">6 games</span>
+          <a class="section__link" href="#" data-en="Browse all" data-fa="همه">Browse all</a>
+        </div>
+        <div class="games">
+          <a class="game game--star" href="#">
+            <div class="game__top"><span class="game__icon"><svg class="icon" aria-hidden="true"><use href="#i-crown"/></svg></span><div style="min-inline-size:0"><div class="game__name" data-en="Shelem" data-fa="شلم">Shelem</div><div class="game__tag" data-en="Bidding, partners, 7 rounds" data-fa="حراج، یارکشی، ۷ دست">Bidding, partners, 7 rounds</div></div><span class="badge badge--star" style="margin-inline-start:auto" data-en="Flagship" data-fa="ویژه">Flagship</span></div>
+            <div class="game__facts"><span class="game__fact"><svg class="icon ic-s" aria-hidden="true"><use href="#i-users"/></svg>4</span><span class="game__fact"><svg class="icon ic-s" aria-hidden="true"><use href="#i-clock"/></svg><span data-en="~45 min" data-fa="~۴۵ دقیقه">~45 min</span></span><span class="game__fact game__rate"><svg class="icon ic-s" aria-hidden="true"><use href="#i-coin"/></svg>80</span></div>
+          </a>
+          <a class="game" href="#">
+            <div class="game__top"><span class="game__icon"><svg class="icon" aria-hidden="true"><use href="#i-chip"/></svg></span><div style="min-inline-size:0"><div class="game__name" data-en="Texas Hold'em" data-fa="تگزاس هولدم">Texas Hold'em</div><div class="game__tag" data-en="No-limit, table chips only" data-fa="بدون سقف، فقط ژتون میز">No-limit, table chips only</div></div></div>
+            <div class="game__facts"><span class="game__fact"><svg class="icon ic-s" aria-hidden="true"><use href="#i-users"/></svg>2–9</span><span class="game__fact"><svg class="icon ic-s" aria-hidden="true"><use href="#i-clock"/></svg><span data-en="~30 min" data-fa="~۳۰ دقیقه">~30 min</span></span><span class="game__fact game__rate"><svg class="icon ic-s" aria-hidden="true"><use href="#i-coin"/></svg>55</span></div>
+          </a>
+          <a class="game" href="#">
+            <div class="game__top"><span class="game__icon"><svg class="icon" aria-hidden="true"><use href="#i-cards"/></svg></span><div style="min-inline-size:0"><div class="game__name" data-en="Blackjack" data-fa="بلک‌جک">Blackjack</div><div class="game__tag" data-en="Dealer stands on 17" data-fa="دیلر روی ۱۷ می‌ایستد">Dealer stands on 17</div></div></div>
+            <div class="game__facts"><span class="game__fact"><svg class="icon ic-s" aria-hidden="true"><use href="#i-users"/></svg>2–6</span><span class="game__fact"><svg class="icon ic-s" aria-hidden="true"><use href="#i-clock"/></svg><span data-en="~12 min" data-fa="~۱۲ دقیقه">~12 min</span></span><span class="game__fact game__rate"><svg class="icon ic-s" aria-hidden="true"><use href="#i-coin"/></svg>25</span></div>
+          </a>
+          <a class="game" href="#">
+            <div class="game__top"><span class="game__icon"><svg class="icon" aria-hidden="true"><use href="#i-knight"/></svg></span><div style="min-inline-size:0"><div class="game__name" data-en="Chess" data-fa="شطرنج">Chess</div><div class="game__tag" data-en="Rapid, 10+5" data-fa="سریع، ۱۰+۵">Rapid, 10+5</div></div></div>
+            <div class="game__facts"><span class="game__fact"><svg class="icon ic-s" aria-hidden="true"><use href="#i-users"/></svg>2</span><span class="game__fact"><svg class="icon ic-s" aria-hidden="true"><use href="#i-clock"/></svg><span data-en="~20 min" data-fa="~۲۰ دقیقه">~20 min</span></span><span class="game__fact game__rate"><svg class="icon ic-s" aria-hidden="true"><use href="#i-coin"/></svg>40</span></div>
+          </a>
+          <a class="game" href="#">
+            <div class="game__top"><span class="game__icon"><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg></span><div style="min-inline-size:0"><div class="game__name" data-en="Sudoku" data-fa="سودوکو">Sudoku</div><div class="game__tag" data-en="Solo, four difficulties" data-fa="انفرادی، چهار سطح">Solo, four difficulties</div></div></div>
+            <div class="game__facts"><span class="game__fact"><svg class="icon ic-s" aria-hidden="true"><use href="#i-users"/></svg>1</span><span class="game__fact"><svg class="icon ic-s" aria-hidden="true"><use href="#i-clock"/></svg><span data-en="~15 min" data-fa="~۱۵ دقیقه">~15 min</span></span><span class="game__fact game__rate"><svg class="icon ic-s" aria-hidden="true"><use href="#i-coin"/></svg>15</span></div>
+          </a>
+          <a class="game" href="#" aria-disabled="true" tabindex="-1">
+            <div class="game__top"><span class="game__icon"><svg class="icon" aria-hidden="true"><use href="#i-spade"/></svg></span><div style="min-inline-size:0"><div class="game__name" data-en="Hokm" data-fa="حکم">Hokm</div><div class="game__tag" data-en="Trick-taking, partners" data-fa="دست‌گیری، یارکشی">Trick-taking, partners</div></div><span class="badge badge--soon" style="margin-inline-start:auto" data-en="Soon" data-fa="به‌زودی">Soon</span></div>
+            <div class="game__facts"><span class="game__fact"><svg class="icon ic-s" aria-hidden="true"><use href="#i-users"/></svg>4</span><span class="game__fact" data-en="Not yet available" data-fa="هنوز در دسترس نیست">Not yet available</span></div>
+          </a>
+        </div>
+      </section>
+
+      <section aria-labelledby="recent-h">
+        <div class="section__head">
+          <h2 id="recent-h" data-en="Recent matches" data-fa="بازی‌های اخیر">Recent matches</h2>
+          <a class="section__link" href="#" data-en="Full history" data-fa="تاریخچه کامل">Full history</a>
+        </div>
+        <div class="matches">
+          <div class="match">
+            <span class="match__icon"><svg class="icon" aria-hidden="true"><use href="#i-crown"/></svg></span>
+            <div><div class="match__name" data-en="Shelem" data-fa="شلم">Shelem</div><div class="match__meta"><span data-en="with Sara, Reza, Nima" data-fa="با سارا، رضا، نیما">with Sara, Reza, Nima</span><span class="num">48:12</span><span data-en="2 hours ago" data-fa="۲ ساعت پیش">2 hours ago</span></div></div>
+            <div class="match__pay"><span class="pill pill--won" data-en="Won" data-fa="برد">Won</span><span class="match__coins" data-paid="yes"><svg class="icon ic-s" aria-hidden="true"><use href="#i-coin"/></svg>+120</span></div>
+          </div>
+          <div class="match">
+            <span class="match__icon"><svg class="icon" aria-hidden="true"><use href="#i-crown"/></svg></span>
+            <div><div class="match__name" data-en="Shelem" data-fa="شلم">Shelem</div><div class="match__meta"><span data-en="with Sara, Reza, Nima" data-fa="با سارا، رضا، نیما">with Sara, Reza, Nima</span><span class="num">51:40</span><span data-en="yesterday" data-fa="دیروز">yesterday</span></div></div>
+            <div class="match__pay"><span class="pill pill--forfeit" data-en="Forfeited" data-fa="سوخته">Forfeited</span><span class="match__coins" data-paid="no"><svg class="icon ic-s" aria-hidden="true"><use href="#i-coin"/></svg>0</span></div>
+            <p class="forfeit-note"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg><span><strong data-en="Your team won, and you earned nothing." data-fa="تیم شما برد، اما سهمی به شما نرسید.">Your team won, and you earned nothing.</strong><span data-en=" You were removed for inactivity after two strikes, so your reward was forfeited. Your partner was paid in full." data-fa=" پس از دو اخطار به دلیل بی‌تحرکی از میز حذف شدید، بنابراین پاداش شما سوخت. هم‌تیمی شما پاداش کامل را دریافت کرد."> You were removed for inactivity after two strikes, so your reward was forfeited. Your partner was paid in full.</span><a href="#" data-en=" Read the rule" data-fa=" مشاهده قانون"> Read the rule</a></span></p>
+          </div>
+          <div class="match">
+            <span class="match__icon"><svg class="icon" aria-hidden="true"><use href="#i-chip"/></svg></span>
+            <div><div class="match__name" data-en="Texas Hold'em" data-fa="تگزاس هولدم">Texas Hold'em</div><div class="match__meta"><span data-en="6 players" data-fa="۶ بازیکن">6 players</span><span class="num">27:03</span><span data-en="2 days ago" data-fa="۲ روز پیش">2 days ago</span></div></div>
+            <div class="match__pay"><span class="pill pill--lost" data-en="Lost" data-fa="باخت">Lost</span><span class="match__coins" data-paid="yes"><svg class="icon ic-s" aria-hidden="true"><use href="#i-coin"/></svg>+14</span></div>
+          </div>
+          <div class="match">
+            <span class="match__icon"><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg></span>
+            <div><div class="match__name" data-en="Sudoku" data-fa="سودوکو">Sudoku</div><div class="match__meta"><span data-en="Hard" data-fa="سخت">Hard</span><span class="num">11:55</span><span data-en="3 days ago" data-fa="۳ روز پیش">3 days ago</span></div></div>
+            <div class="match__pay"><span class="pill pill--won" data-en="Solved" data-fa="حل شد">Solved</span><span class="match__coins" data-paid="yes"><svg class="icon ic-s" aria-hidden="true"><use href="#i-coin"/></svg>+15</span></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <aside class="rail" aria-label="Friends and invites">
+      <div class="rail__card">
+        <div class="section__head" style="margin-block-end:var(--space-2);padding-block-end:var(--space-2)"><h2 style="font-size:var(--text-base)" data-en="Friends online" data-fa="دوستان آنلاین">Friends online</h2><span class="section__count num">4</span></div>
+        <div class="friend"><div class="avatar" style="inline-size:32px;block-size:32px;font-size:11px">SA<span class="avatar__dot" data-state="online"></span></div><div><div class="friend__n">Sara</div><div class="friend__s" data-en="In a Shelem table" data-fa="در یک میز شلم">In a Shelem table</div></div><button class="friend__act" data-en="Join" data-fa="ورود">Join</button></div>
+        <div class="friend"><div class="avatar" style="inline-size:32px;block-size:32px;font-size:11px">RZ<span class="avatar__dot" data-state="disconnected"></span></div><div><div class="friend__n">Reza</div><div class="friend__s" data-en="Reconnecting…" data-fa="در حال اتصال…">Reconnecting…</div></div></div>
+        <div class="friend"><div class="avatar" style="inline-size:32px;block-size:32px;font-size:11px">NM<span class="avatar__dot" data-state="online"></span></div><div><div class="friend__n">Nima</div><div class="friend__s" data-en="In the lobby" data-fa="در لابی">In the lobby</div></div><button class="friend__act" data-en="Invite" data-fa="دعوت">Invite</button></div>
+        <div class="friend"><div class="avatar" style="inline-size:32px;block-size:32px;font-size:11px">LE<span class="avatar__dot" data-state="online"></span></div><div><div class="friend__n">Leila</div><div class="friend__s" data-en="In the lobby" data-fa="در لابی">In the lobby</div></div><button class="friend__act" data-en="Invite" data-fa="دعوت">Invite</button></div>
+      </div>
+      <div class="rail__card">
+        <h2 style="font-size:var(--text-base);margin-block-end:var(--space-3)" data-en="Invite a friend" data-fa="دعوت از دوستان">Invite a friend</h2>
+        <p style="font-size:var(--text-sm);color:var(--color-text-muted);margin-block-end:var(--space-4)" data-en="They can join without an account. Coins they earn are held until they sign up." data-fa="بدون حساب کاربری هم می‌توانند وارد شوند. سکه‌هایشان تا زمان ثبت‌نام نگه داشته می‌شود.">They can join without an account. Coins they earn are held until they sign up.</p>
+        <div class="invite"><span class="invite__code">SEEDDEMO</span><button class="btn btn--quiet btn--block"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span data-en="Copy link" data-fa="کپی لینک">Copy link</span></button></div>
+      </div>
+      <div class="rail__card">
+        <h2 style="font-size:var(--text-base);margin-block-end:var(--space-3)" data-en="Create a table" data-fa="ساخت میز">Create a table</h2>
+        <p style="font-size:var(--text-sm);color:var(--color-text-muted);margin-block-end:var(--space-4)" data-en="Pick a game, set the seats, share the link." data-fa="بازی را انتخاب کن، صندلی‌ها را تعیین کن، لینک را بفرست.">Pick a game, set the seats, share the link.</p>
+        <button class="btn btn--primary btn--block"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg><span data-en="New table" data-fa="میز جدید">New table</span></button>
+      </div>
+    </aside>
+  </div>
+
+  <p class="footnote">Direction 05 · <strong>Bento Press</strong> — flat, 2px rules, warm paper, asymmetric bento · Space Grotesk + Inter + Vazirmatn</p>
+</main>
+
+<script>
+const root=document.documentElement;
+document.getElementById('theme').onclick=()=>root.dataset.theme=root.dataset.theme==='dark'?'light':'dark';
+const langBtn=document.getElementById('lang');
+langBtn.onclick=()=>{const toFa=root.dir==='ltr';root.dir=toFa?'rtl':'ltr';root.lang=toFa?'fa':'en';langBtn.textContent=toFa?'EN':'فا';
+document.querySelectorAll('[data-en]').forEach(el=>el.textContent=toFa?el.dataset.fa:el.dataset.en);};
+const ring=document.getElementById('ring'),clock=document.getElementById('clock');
+const C=2*Math.PI*36,TOTAL=30;let left=23;ring.style.strokeDasharray=C;
+const tick=()=>{ring.style.strokeDashoffset=C*(1-left/TOTAL);clock.textContent='0:'+String(left).padStart(2,'0');
+ring.style.stroke=left<=5?'var(--timer-danger)':left<=10?'var(--timer-warn)':'var(--timer-ok)';left=left>0?left-1:TOTAL;};
+tick(); if(!matchMedia('(prefers-reduced-motion: reduce)').matches) setInterval(tick,1000);
+</script>
+</body>
+</html>

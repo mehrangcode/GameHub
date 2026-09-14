@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en" dir="ltr" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Design directions — player lobby</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#FBFAF8; --surface:#FFF; --sunken:#F3F1ED; --border:#E3E0DA; --line:#CFCBC3;
+  --text:#1A1815; --muted:#6A655C; --accent:#0F766E; --accent-soft:#E6F2F0;
+  --warn:#A16207; --warn-soft:#FBF3E0; --ok:#15803D; --ok-soft:#EAF6EE;
+  --r:12px; --mono:'JetBrains Mono',ui-monospace,monospace;
+}
+:root[data-theme="dark"]{
+  --bg:#131210; --surface:#1C1B18; --sunken:#0E0D0B; --border:#302E29; --line:#464339;
+  --text:#F2F0EB; --muted:#A29D93; --accent:#2DD4BF; --accent-soft:#10302D;
+  --warn:#FBBF24; --warn-soft:#2E2410; --ok:#4ADE80; --ok-soft:#12291A;
+}
+*,*::before,*::after{box-sizing:border-box} *{margin:0}
+html{color-scheme:light dark} :root[data-theme="dark"]{color-scheme:dark}
+body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;font-size:15px;line-height:1.65;min-block-size:100dvh}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.2;letter-spacing:-.02em}
+code{font-family:var(--mono);font-size:.85em;background:var(--sunken);padding:1px 5px;border-radius:4px}
+.wrap{max-inline-size:1160px;margin-inline:auto;padding:2.5rem 1.25rem 5rem}
+
+.head{display:flex;align-items:flex-start;gap:1rem;flex-wrap:wrap;margin-block-end:.75rem}
+.head h1{font-size:1.9rem;font-weight:700}
+.toggle{margin-inline-start:auto;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:999px;padding:.5rem 1rem;font:inherit;font-size:.85rem;font-weight:600;cursor:pointer;min-block-size:40px}
+.toggle:hover{border-color:var(--line)}
+.lede{color:var(--muted);max-inline-size:74ch;margin-block-end:1.5rem}
+.lede strong{color:var(--text)}
+
+.note{border:1px solid var(--border);border-inline-start:3px solid var(--accent);background:var(--surface);border-radius:var(--r);padding:1rem 1.25rem;margin-block-end:2.5rem}
+.note h3{font-size:.95rem;margin-block-end:.35rem}
+.note p{font-size:.9rem;color:var(--muted)}
+
+.grid{display:grid;gap:1.25rem;grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}
+.opt{border:1px solid var(--border);background:var(--surface);border-radius:var(--r);overflow:hidden;display:flex;flex-direction:column;transition:box-shadow .2s,transform .2s,border-color .2s}
+.opt:hover{transform:translateY(-3px);border-color:var(--line);box-shadow:0 12px 30px rgba(0,0,0,.10)}
+.opt__body{padding:1.25rem;display:grid;gap:.75rem;flex:1;align-content:start}
+.opt__n{display:flex;align-items:baseline;gap:.6rem}
+.opt__num{font-family:var(--mono);font-size:.8rem;color:var(--muted)}
+.opt__t{font-size:1.05rem;font-weight:700}
+.opt__d{font-size:.9rem;color:var(--muted)}
+.swatches{display:flex;gap:.35rem}
+.sw{inline-size:26px;block-size:26px;border-radius:6px;border:1px solid rgba(128,128,128,.25)}
+.fx{display:grid;gap:.4rem;font-size:.83rem}
+.fx div{display:flex;gap:.5rem;align-items:flex-start}
+.fx b{flex:none;font-size:.7rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:1px 7px;border-radius:999px;margin-block-start:2px}
+.fx .good b{background:var(--ok-soft);color:var(--ok)}
+.fx .cost b{background:var(--warn-soft);color:var(--warn)}
+.opt__go{display:block;padding:.85rem 1.25rem;border-block-start:1px solid var(--border);background:var(--sunken);font-weight:600;font-size:.88rem;text-decoration:none;color:var(--accent);text-align:center;min-block-size:44px}
+.opt__go:hover{background:var(--accent);color:#fff}
+
+/* ── the thumbnails: each built from its own direction's real tokens ──── */
+.thumb{block-size:172px;padding:14px;display:grid;gap:8px;grid-template-rows:auto 1fr;position:relative;overflow:hidden;border-block-end:1px solid var(--border)}
+.t-bar{display:flex;align-items:center;gap:6px;font-size:9px;font-weight:700}
+.t-dot{inline-size:16px;block-size:16px;border-radius:5px;flex:none}
+.t-pill{margin-inline-start:auto;padding:2px 7px;font-size:8px;border-radius:999px}
+.t-body{display:grid;grid-template-columns:1.35fr 1fr;gap:8px;min-block-size:0}
+.t-main{display:grid;gap:6px;grid-template-rows:auto 1fr}
+.t-hero{padding:9px;display:grid;gap:5px;align-content:center}
+.t-h1{block-size:8px;inline-size:56%;border-radius:3px}
+.t-h2{block-size:5px;inline-size:38%;border-radius:3px;opacity:.5}
+.t-seats{display:flex;gap:4px;margin-block-start:2px}
+.t-seat{inline-size:14px;block-size:14px;border-radius:999px}
+.t-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.t-card{padding:7px;display:grid;gap:4px;align-content:start}
+.t-ic{inline-size:14px;block-size:14px;border-radius:4px}
+.t-ln{block-size:4px;border-radius:2px;opacity:.55}
+.t-side{display:grid;gap:6px;grid-auto-rows:min-content}
+.t-box{padding:8px;display:grid;gap:4px}
+.t-btn{block-size:16px;border-radius:999px}
+
+/* 01 Quiet Table */
+.q{background:#FAF9F7;color:#1B1A18;font-family:'Inter',sans-serif}
+.q .t-dot{background:#0F766E} .q .t-pill{background:#E6F2F0;color:#0F766E}
+.q .t-hero{background:#fff;border:1px solid #E4E1DC;border-radius:10px;border-inline-start:3px solid #B45309}
+.q .t-h1,.q .t-ln{background:#1B1A18} .q .t-h2{background:#6B6761}
+.q .t-seat{background:#F4F2EF;border:1px solid #E4E1DC} .q .t-seat:first-child{background:#0F766E;border-color:#0F766E}
+.q .t-card,.q .t-box{background:#fff;border:1px solid #E4E1DC;border-radius:10px}
+.q .t-ic{background:#F4F2EF} .q .t-card:first-child .t-ic{background:#E6F2F0}
+.q .t-btn{background:#0F766E}
+
+/* 02 Neon Arcade */
+.n{background:#08070F;color:#EDEAF7;font-family:'Inter',sans-serif}
+.n::after{content:"";position:absolute;inset:0;background:radial-gradient(18rem 10rem at 10% -10%,rgba(139,92,246,.35),transparent 65%),radial-gradient(14rem 9rem at 95% 5%,rgba(244,63,94,.25),transparent 62%);pointer-events:none}
+.n .t-dot{background:linear-gradient(135deg,#8B5CF6,#F43F5E)} .n .t-pill{background:#F43F5E;color:#150308}
+.n .t-hero{background:#191529;border:1px solid #F43F5E;box-shadow:0 0 20px -6px rgba(244,63,94,.6)}
+.n .t-h1{background:#EDEAF7} .n .t-h2{background:#8E86AD} .n .t-ln{background:#8E86AD}
+.n .t-seat{background:#110F1D;border:1px solid #2A2440;border-radius:2px} .n .t-seat:first-child{background:#F43F5E;border-color:#F43F5E}
+.n .t-card,.n .t-box{background:#110F1D;border:1px solid #2A2440}
+.n .t-ic{background:#1E1637} .n .t-card:first-child .t-ic{background:linear-gradient(135deg,#8B5CF6,#F43F5E)}
+.n .t-btn{background:#F43F5E;border-radius:2px}
+
+/* 03 Card Room */
+.c{background:#0B1512;color:#F2EDE3;font-family:'Inter',sans-serif}
+.c::after{content:"";position:absolute;inset:0;background:radial-gradient(20rem 12rem at 50% -25%,rgba(52,110,80,.45),transparent 70%);pointer-events:none}
+.c .t-dot{background:radial-gradient(circle at 30% 25%,#E0B93C,#C9A227 60%,#7A5F12);border-radius:999px}
+.c .t-pill{background:#2A2412;color:#C9A227}
+.c .t-hero{background:linear-gradient(160deg,#18291F,#122019);border:1px solid #355245;border-radius:14px;box-shadow:0 8px 22px rgba(0,0,0,.5)}
+.c .t-h1{background:#F2EDE3} .c .t-h2{background:#9CAB9F} .c .t-ln{background:#9CAB9F}
+.c .t-seat{background:#0A120F;border:1px solid #22382B} .c .t-seat:first-child{background:#C9A227;border-color:#C9A227}
+.c .t-card,.c .t-box{background:#122019;border:1px solid #22382B;border-radius:14px}
+.c .t-ic{background:#0A120F;border-radius:8px} .c .t-card:first-child .t-ic{background:radial-gradient(circle at 30% 25%,#E0B93C,#C9A227 70%)}
+.c .t-btn{background:linear-gradient(180deg,#E0B93C,#C9A227)}
+
+/* 04 Aurora Glass */
+.a{background:#EEF1F8;color:#171429;font-family:'Inter',sans-serif}
+.a::before{content:"";position:absolute;inset:0;background:radial-gradient(16rem 11rem at 6% 0%,rgba(109,74,255,.45),transparent 62%),radial-gradient(14rem 10rem at 96% 6%,rgba(255,92,138,.40),transparent 64%),radial-gradient(15rem 11rem at 50% 104%,rgba(34,211,238,.40),transparent 64%);pointer-events:none}
+.a>*{position:relative;z-index:1}
+.a .t-dot{background:linear-gradient(135deg,#6D4AFF,#FF5C8A)} .a .t-pill{background:rgba(255,255,255,.55);color:#6D4AFF}
+.a .t-hero{background:rgba(255,255,255,.78);border:1px solid rgba(255,255,255,.8);border-radius:20px;backdrop-filter:blur(8px)}
+.a .t-h1,.a .t-ln{background:#171429} .a .t-h2{background:#5C5478}
+.a .t-seat{background:rgba(255,255,255,.5);border:1px solid rgba(255,255,255,.75)} .a .t-seat:first-child{background:#6D4AFF;border-color:#6D4AFF}
+.a .t-card,.a .t-box{background:rgba(255,255,255,.62);border:1px solid rgba(255,255,255,.72);border-radius:16px;backdrop-filter:blur(8px)}
+.a .t-ic{background:rgba(255,255,255,.6);border-radius:8px} .a .t-card:first-child .t-ic{background:linear-gradient(135deg,#6D4AFF,#FF5C8A)}
+.a .t-btn{background:linear-gradient(135deg,#6D4AFF,#FF5C8A)}
+
+/* 05 Bento Press */
+.b{background:#F6F2EA;color:#1A1712;font-family:'Inter',sans-serif}
+.b .t-dot{background:#E5482F;border-radius:0} .b .t-pill{background:#E5482F;color:#FFFDF9;border-radius:0}
+.b .t-hero{background:#FFFDF9;border:2px solid #1A1712;border-radius:0}
+.b .t-h1,.b .t-ln{background:#1A1712} .b .t-h2{background:#6C6355}
+.b .t-seat{background:#EDE7DA;border:2px solid #1A1712;border-radius:0} .b .t-seat:first-child{background:#E5482F;border-color:#E5482F}
+.b .t-card,.b .t-box{background:#FFFDF9;border:2px solid #1A1712;border-radius:0}
+.b .t-card:nth-child(2){background:#1A1712} .b .t-card:nth-child(2) .t-ln{background:#FFFDF9}
+.b .t-card:nth-child(3){background:#E5482F;border-color:#E5482F} .b .t-card:nth-child(3) .t-ln{background:#FFFDF9}
+.b .t-ic{background:#EDE7DA;border-radius:0} .b .t-card:first-child .t-ic{background:#E5482F}
+.b .t-card:nth-child(2) .t-ic{background:#FFFDF9} .b .t-card:nth-child(3) .t-ic{background:#FFFDF9}
+.b .t-btn{background:#E5482F;border-radius:0}
+
+/* ── comparison table ─────────────────────────────────────────────────── */
+.tablewrap{overflow-x:auto;margin-block-start:3rem;border:1px solid var(--border);border-radius:var(--r);background:var(--surface)}
+table{border-collapse:collapse;inline-size:100%;font-size:.85rem;min-inline-size:760px}
+th,td{text-align:start;padding:.7rem .9rem;border-block-end:1px solid var(--border);vertical-align:top}
+thead th{background:var(--sunken);font-weight:700;font-size:.78rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+tbody tr:last-child td{border-block-end:0}
+td:first-child{font-weight:600;white-space:nowrap}
+.y{color:var(--ok);font-weight:600} .m{color:var(--warn);font-weight:600} .n2{color:var(--muted)}
+.foot{margin-block-start:2.5rem;color:var(--muted);font-size:.88rem;border-block-start:1px solid var(--border);padding-block-start:1.5rem}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="head">
+    <h1>Design directions — player lobby</h1>
+    <button class="toggle" id="theme">Toggle theme</button>
+  </div>
+
+  <p class="lede">
+    Five art directions for the logged-in lobby, each a standalone HTML file with
+    <strong>the same content and the same token names</strong> — only the values and the surface
+    treatment differ. Every one has a working <strong>light/dark toggle</strong> and a working
+    <strong>EN ⇄ فارسی toggle</strong> that flips <code>dir</code> and mirrors the whole layout.
+    Open them, switch both toggles, then tell me a number.
+  </p>
+
+  <div class="note">
+    <h3>Why the token names are identical everywhere</h3>
+    <p>
+      Picking a direction is a <em>values</em> decision, not an architecture decision. Whichever
+      one you choose, its <code>:root</code> and <code>[data-theme="dark"]</code> blocks become
+      <code>frontend/src/styles/tokens.css</code> and every CSS Module reads them by name — which
+      is exactly what the runtime cosmetics/theming system in <code>06-frontend-architecture.md</code>
+      needs. Changing your mind later is a values edit, not a rewrite.
+      See <a href="_shared/README.md">_shared/README.md</a> for the full token list and the
+      constraints each sample already honours.
+    </p>
+  </div>
+
+  <div class="grid">
+
+    <!-- 01 -->
+    <article class="opt">
+      <div class="thumb q">
+        <div class="t-bar"><span class="t-dot"></span>Template<span class="t-pill">2,480</span></div>
+        <div class="t-body">
+          <div class="t-main">
+            <div class="t-hero"><div class="t-h1"></div><div class="t-h2"></div><div class="t-seats"><i class="t-seat"></i><i class="t-seat"></i><i class="t-seat"></i><i class="t-seat"></i></div></div>
+            <div class="t-cards"><div class="t-card"><i class="t-ic"></i><i class="t-ln"></i></div><div class="t-card"><i class="t-ic"></i><i class="t-ln"></i></div><div class="t-card"><i class="t-ic"></i><i class="t-ln"></i></div></div>
+          </div>
+          <div class="t-side"><div class="t-box"><i class="t-ln"></i><i class="t-ln"></i><i class="t-ln"></i></div><div class="t-box"><i class="t-btn"></i></div></div>
+        </div>
+      </div>
+      <div class="opt__body">
+        <div class="opt__n"><span class="opt__num">01</span><span class="opt__t">Quiet Table</span></div>
+        <p class="opt__d">Warm neutral, light-first, one deep-teal accent. Borders carry the hierarchy; shadows are almost absent. The most "product", the least "game".</p>
+        <div class="swatches" aria-hidden="true"><i class="sw" style="background:#FAF9F7"></i><i class="sw" style="background:#0F766E"></i><i class="sw" style="background:#B45309"></i><i class="sw" style="background:#B88400"></i><i class="sw" style="background:#1B1A18"></i></div>
+        <div class="fx">
+          <div class="good"><b>Best at</b><span>45-minute sessions, Persian text at 16px, ageing well, being cheap to extend to the admin console.</span></div>
+          <div class="cost"><b>Costs you</b><span>Nothing memorable. A stranger will not screenshot this.</span></div>
+        </div>
+      </div>
+      <a class="opt__go" href="01-quiet-table.html">Open 01 →</a>
+    </article>
+
+    <!-- 02 -->
+    <article class="opt">
+      <div class="thumb n">
+        <div class="t-bar"><span class="t-dot"></span>Template<span class="t-pill">2,480</span></div>
+        <div class="t-body">
+          <div class="t-main">
+            <div class="t-hero"><div class="t-h1"></div><div class="t-h2"></div><div class="t-seats"><i class="t-seat"></i><i class="t-seat"></i><i class="t-seat"></i><i class="t-seat"></i></div></div>
+            <div class="t-cards"><div class="t-card"><i class="t-ic"></i><i class="t-ln"></i></div><div class="t-card"><i class="t-ic"></i><i class="t-ln"></i></div><div class="t-card"><i class="t-ic"></i><i class="t-ln"></i></div></div>
+          </div>
+          <div class="t-side"><div class="t-box"><i class="t-ln"></i><i class="t-ln"></i><i class="t-ln"></i></div><div class="t-box"><i class="t-btn"></i></div></div>
+        </div>
+      </div>
+      <div class="opt__body">
+        <div class="opt__n"><span class="opt__num">02</span><span class="opt__t">Neon Arcade</span></div>
+        <p class="opt__d">OLED dark, violet + rose, clipped corners, glow as the elevation model. Competitive energy — the lobby as a night out.</p>
+        <div class="swatches" aria-hidden="true"><i class="sw" style="background:#08070F"></i><i class="sw" style="background:#8B5CF6"></i><i class="sw" style="background:#F43F5E"></i><i class="sw" style="background:#FFC53D"></i><i class="sw" style="background:#22E6A0"></i></div>
+        <div class="fx">
+          <div class="good"><b>Best at</b><span>Making a turn deadline feel urgent and a win feel loud. Strongest first impression by a distance.</span></div>
+          <div class="cost"><b>Costs you</b><span>A real light theme — daylight neon is a different product. Uppercase tracking has to be disabled in Persian (it already is).</span></div>
+        </div>
+      </div>
+      <a class="opt__go" href="02-neon-arcade.html">Open 02 →</a>
+    </article>
+
+    <!-- 03 -->
+    <article class="opt">
+      <div class="thumb c">
+        <div class="t-bar"><span class="t-dot"></span>Template<span class="t-pill">2,480</span></div>
+        <div class="t-body">
+          <div class="t-main">
+            <div class="t-hero"><div class="t-h1"></div><div class="t-h2"></div><div class="t-seats"><i class="t-seat"></i><i class="t-seat"></i><i class="t-seat"></i><i class="t-seat"></i></div></div>
+            <div class="t-cards"><div class="t-card"><i class="t-ic"></i><i class="t-ln"></i></div><div class="t-card"><i class="t-ic"></i><i class="t-ln"></i></div><div class="t-card"><i class="t-ic"></i><i class="t-ln"></i></div></div>
+          </div>
+          <div class="t-side"><div class="t-box"><i class="t-ln"></i><i class="t-ln"></i><i class="t-ln"></i></div><div class="t-box"><i class="t-btn"></i></div></div>
+        </div>
+      </div>
+      <div class="opt__body">
+        <div class="opt__n"><span class="opt__num">03</span><span class="opt__t">Card Room</span></div>
+        <p class="opt__d">Felt green, walnut, brass. Serif display over a clean sans. Depth is real — inset light on every raised edge, the way a physical table has depth.</p>
+        <div class="swatches" aria-hidden="true"><i class="sw" style="background:#0B1512"></i><i class="sw" style="background:#C9A227"></i><i class="sw" style="background:#8A1F2B"></i><i class="sw" style="background:#F2EDE3"></i><i class="sw" style="background:#355245"></i></div>
+        <div class="fx">
+          <div class="good"><b>Best at</b><span>Taking Shelem's flagship status literally. Says "a room where four people sit for an evening" better than any of the others.</span></div>
+          <div class="cost"><b>Costs you</b><span>Serif + Persian needs care — Playfair has no Arabic, so Vazirmatn carries the whole RTL identity and the two do not look alike.</span></div>
+        </div>
+      </div>
+      <a class="opt__go" href="03-card-room.html">Open 03 →</a>
+    </article>
+
+    <!-- 04 -->
+    <article class="opt">
+      <div class="thumb a">
+        <div class="t-bar"><span class="t-dot"></span>Template<span class="t-pill">2,480</span></div>
+        <div class="t-body">
+          <div class="t-main">
+            <div class="t-hero"><div class="t-h1"></div><div class="t-h2"></div><div class="t-seats"><i class="t-seat"></i><i class="t-seat"></i><i class="t-seat"></i><i class="t-seat"></i></div></div>
+            <div class="t-cards"><div class="t-card"><i class="t-ic"></i><i class="t-ln"></i></div><div class="t-card"><i class="t-ic"></i><i class="t-ln"></i></div><div class="t-card"><i class="t-ic"></i><i class="t-ln"></i></div></div>
+          </div>
+          <div class="t-side"><div class="t-box"><i class="t-ln"></i><i class="t-ln"></i><i class="t-ln"></i></div><div class="t-box"><i class="t-btn"></i></div></div>
+        </div>
+      </div>
+      <div class="opt__body">
+        <div class="opt__n"><span class="opt__num">04</span><span class="opt__t">Aurora Glass</span></div>
+        <p class="opt__d">Frosted translucent surfaces over a fixed gradient mesh. The only direction where light and dark are genuinely equal citizens.</p>
+        <div class="swatches" aria-hidden="true"><i class="sw" style="background:#EEF1F8"></i><i class="sw" style="background:#6D4AFF"></i><i class="sw" style="background:#FF5C8A"></i><i class="sw" style="background:#22D3EE"></i><i class="sw" style="background:#0C0A18"></i></div>
+        <div class="fx">
+          <div class="good"><b>Best at</b><span>Looking current and expensive with almost no artwork. Cosmetic themes are a mesh swap, which is one variable.</span></div>
+          <div class="cost"><b>Costs you</b><span><code>backdrop-filter</code> forces compositing on every panel; it is already dropped below 560px here. Low-contrast risk on translucent surfaces needs watching forever.</span></div>
+        </div>
+      </div>
+      <a class="opt__go" href="04-aurora-glass.html">Open 04 →</a>
+    </article>
+
+    <!-- 05 -->
+    <article class="opt">
+      <div class="thumb b">
+        <div class="t-bar"><span class="t-dot"></span>Template<span class="t-pill">2,480</span></div>
+        <div class="t-body">
+          <div class="t-main">
+            <div class="t-hero"><div class="t-h1"></div><div class="t-h2"></div><div class="t-seats"><i class="t-seat"></i><i class="t-seat"></i><i class="t-seat"></i><i class="t-seat"></i></div></div>
+            <div class="t-cards"><div class="t-card"><i class="t-ic"></i><i class="t-ln"></i></div><div class="t-card"><i class="t-ic"></i><i class="t-ln"></i></div><div class="t-card"><i class="t-ic"></i><i class="t-ln"></i></div></div>
+          </div>
+          <div class="t-side"><div class="t-box"><i class="t-ln"></i><i class="t-ln"></i><i class="t-ln"></i></div><div class="t-box"><i class="t-btn"></i></div></div>
+        </div>
+      </div>
+      <div class="opt__body">
+        <div class="opt__n"><span class="opt__num">05</span><span class="opt__t">Bento Press</span></div>
+        <p class="opt__d">Flat, high-contrast, warm paper. No shadows at all — 2px rules and flat colour blocks. The only direction that also changes the <em>layout</em>, to an asymmetric bento grid.</p>
+        <div class="swatches" aria-hidden="true"><i class="sw" style="background:#F6F2EA"></i><i class="sw" style="background:#1A1712"></i><i class="sw" style="background:#E5482F"></i><i class="sw" style="background:#EDE7DA"></i><i class="sw" style="background:#1D6B3E"></i></div>
+        <div class="fx">
+          <div class="good"><b>Best at</b><span>Cheapest to render, easiest to keep accessible, most distinctive per byte. Ages the best of the five.</span></div>
+          <div class="cost"><b>Costs you</b><span>Hardest to make feel warm rather than severe. Flat vermilion on paper is a strong opinion you cannot half-hold.</span></div>
+        </div>
+      </div>
+      <a class="opt__go" href="05-bento-press.html">Open 05 →</a>
+    </article>
+
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr><th>Direction</th><th>Mode</th><th>Persian / RTL</th><th>Render cost</th><th>Cosmetic themes</th><th>Reuse for admin console</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>01 Quiet Table</td><td class="y">Light-first, real dark</td><td class="y">Excellent — neutral, no tracking tricks</td><td class="y">Lowest</td><td class="m">Accent swap only; restrained by design</td><td class="y">Direct — the admin console wants exactly this</td></tr>
+        <tr><td>02 Neon Arcade</td><td class="m">Dark-first; light is secondary</td><td class="m">Good — uppercase/tracking disabled in fa</td><td class="m">Glow + two fixed gradients</td><td class="y">Excellent — hue swaps read instantly</td><td class="n2">Poor — an operator at 2 a.m. does not want neon</td></tr>
+        <tr><td>03 Card Room</td><td class="m">Dark-first; daylight variant included</td><td class="m">Good — but Playfair has no Arabic</td><td class="y">Low</td><td class="y">Strong — felt colour + metal are two variables</td><td class="m">Workable, needs a flatter sibling</td></tr>
+        <tr><td>04 Aurora Glass</td><td class="y">Both equal</td><td class="y">Excellent</td><td class="n2">Highest — <code>backdrop-filter</code> per panel</td><td class="y">Best — a theme is one mesh</td><td class="n2">Poor — dense tables under glass is a bad idea</td></tr>
+        <tr><td>05 Bento Press</td><td class="y">Both equal</td><td class="y">Excellent — contrast is never in doubt</td><td class="y">Lowest</td><td class="m">Limited — the palette is the identity</td><td class="y">Excellent — dense data is its home ground</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="foot">
+    <strong>Look hardest at one thing in each:</strong> the forfeited Shelem row in “Recent matches”.
+    Your team won and you were paid nothing, because you were ejected for inactivity. If a direction
+    cannot make that read as <em>a published rule you could have read beforehand</em> rather than
+    <em>a bug the platform just committed</em>, it is the wrong direction — that row is the single
+    hardest thing in this lobby to design, and it is the one players will screenshot and ask about.
+  </p>
+
+</div>
+<script>
+const r=document.documentElement;
+document.getElementById('theme').onclick=()=>r.dataset.theme=r.dataset.theme==='dark'?'light':'dark';
+if(matchMedia('(prefers-color-scheme: dark)').matches) r.dataset.theme='dark';
+</script>
+</body>
+</html>
