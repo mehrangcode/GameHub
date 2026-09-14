@@ -1,0 +1,52 @@
+{
+  "shelem": { "name": "Shelem", "tagline": "Bidding, partners, seven rounds" },
+  "poker": { "name": "Texas Hold'em", "tagline": "No-limit, table chips only" },
+  "blackjack": { "name": "Blackjack", "tagline": "Dealer stands on 17" },
+  "chess": { "name": "Chess", "tagline": "Rapid, 10+5" },
+  "sudoku": { "name": "Sudoku", "tagline": "Solo, four difficulties" },
+
+  "card": {
+    "players": "{{min}}–{{max}} players",
+    "playersExact": "{{count}} players",
+    "playersSolo": "Solo",
+    "minutes": "~{{min}}–{{max}} min",
+    "rate": "{{count}} coins",
+    "comingSoon": "Coming soon",
+    "notYetAvailable": "Not yet available",
+    "hiddenInfo": "Hidden hands",
+    "standardDeck": "Standard deck",
+    "complexity": {
+      "light": "Light",
+      "medium": "Medium",
+      "heavy": "Heavy"
+    },
+    "play": "Create a table"
+  },
+  "list": {
+    "title": "Start a table",
+    "count": "{{count}} games",
+    "empty": "No games are available yet.",
+    "error": "We could not load the game list."
+  },
+
+  "event": { "move": "{{name}} played" },
+  "fixture": {
+    "name": "Fixture",
+    "tagline": "A test rig, not a game",
+    "move": {
+      "press": "{{name}} pressed",
+      "pass": "{{name}} passed"
+    }
+  },
+
+  "reward": {
+    "earned": "Reward for this match",
+    "bot": "A bot held this seat",
+    "noRule": "This game does not award coins",
+    "tableIneligible": "This table does not award coins",
+    "resigned": "You resigned, so this match pays a quarter",
+    "returned": "You reclaimed your seat, so this match pays half",
+    "forfeitedTimeout": "You were removed for inactivity, so your reward was forfeited",
+    "forfeitedAbandon": "You were disconnected for too long, so your reward was forfeited"
+  }
+}

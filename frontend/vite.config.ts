@@ -22,6 +22,10 @@ export default defineConfig({
       output: {
         manualChunks: {
           vendor: ['react', 'react-dom', 'react-router'],
+          // Split out because the welcome page, the login form and the invite
+          // landing page never open a socket — only the table does. Keeping it
+          // in the entry chunk makes the first screen pay for the last one.
+          socket: ['socket.io-client'],
           // Game renderers are lazy routes, deliberately not chunked here.
         },
       },

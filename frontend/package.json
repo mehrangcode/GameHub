@@ -21,10 +21,19 @@
     "contracts:check": "node scripts/check-contracts.mjs"
   },
   "dependencies": {
+    "@hookform/resolvers": "^5.9.1",
+    "axios": "^1.20.0",
+    "i18next": "^26.4.2",
+    "i18next-browser-languagedetector": "^8.2.1",
+    "immer": "^11.1.18",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-hook-form": "^7.88.0",
+    "react-i18next": "^17.0.14",
     "react-router": "^7.1.1",
-    "zod": "^3.25.76"
+    "socket.io-client": "^4.8.3",
+    "zod": "^3.25.76",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
@@ -36,6 +45,7 @@
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
     "@vitejs/plugin-react": "^4.3.4",
+    "axios-mock-adapter": "^2.1.0",
     "eslint": "^9.17.0",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-react-hooks": "^5.1.0",

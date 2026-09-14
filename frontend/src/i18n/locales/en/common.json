@@ -1,0 +1,63 @@
+{
+  "brand": "Template",
+  "nav": {
+    "play": "Play",
+    "games": "Games",
+    "store": "Store",
+    "customize": "Customize",
+    "wallet": "Wallet",
+    "premium": "Premium",
+    "profile": "Profile",
+    "primary": "Primary"
+  },
+  "actions": {
+    "signIn": "Sign in",
+    "signUp": "Create account",
+    "signOut": "Sign out",
+    "cancel": "Cancel",
+    "retry": "Try again",
+    "copy": "Copy link",
+    "copied": "Copied",
+    "close": "Close",
+    "dismiss": "Dismiss",
+    "back": "Back",
+    "backHome": "Back to games",
+    "newTable": "New table"
+  },
+  "wallet": {
+    "label": "Wallet",
+    "coin": "Coins",
+    "gem": "Gems",
+    "ticket": "Tickets",
+    "provisional": "Held until you sign up"
+  },
+  "theme": {
+    "toggle": "Toggle theme",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
+  },
+  "language": {
+    "switch": "Switch language",
+    "other": "فا"
+  },
+  "presence": {
+    "online": "Online",
+    "away": "Away",
+    "disconnected": "Reconnecting",
+    "reconnectingIn": "Reconnecting… {{time}}"
+  },
+  "state": {
+    "loading": "Loading…",
+    "error": "Something went wrong.",
+    "empty": "Nothing here yet."
+  },
+  "a11y": {
+    "skipToContent": "Skip to content",
+    "loading": "Loading"
+  },
+  "notFound": {
+    "title": "Page not found",
+    "body": "That link does not lead anywhere. It may have expired."
+  }
+}

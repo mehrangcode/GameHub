@@ -1,0 +1,93 @@
+{
+  "seat": {
+    "empty": "صندلی خالی",
+    "sitHere": "اینجا بنشین",
+    "number": "صندلی {{seat}}",
+    "you": "شما",
+    "bot": "ربات",
+    "spectator": "تماشاگر",
+    "host": "میزبان",
+    "team": "تیم {{team}}",
+    "leave": "ترک صندلی",
+    "kick": "حذف",
+    "addBot": "افزودن ربات",
+    "removeBot": "حذف ربات"
+  },
+  "status": {
+    "waiting": "در انتظار بازیکنان",
+    "inProgress": "در جریان",
+    "finished": "پایان‌یافته",
+    "closed": "بسته"
+  },
+  "toolbar": {
+    "start": "شروع بازی",
+    "invite": "دعوت",
+    "options": "تنظیمات",
+    "close": "بستن میز",
+    "spectators": "{{count}} تماشاگر"
+  },
+  "chat": {
+    "title": "گفتگو",
+    "placeholder": "چیزی بنویسید…",
+    "send": "ارسال",
+    "empty": "هنوز پیامی نیست."
+  },
+  "turn": {
+    "yours": "نوبت شما",
+    "theirs": "{{name}} در حال فکر کردن است",
+    "label": "مهلت نوبت",
+    "strikes": "{{count}} از {{limit}} اخطار",
+    "syncing": "در حال هماهنگ‌سازی…"
+  },
+  "warning": {
+    "title": "بازی کنید وگرنه صندلی را از دست می‌دهید",
+    "body": "{{seconds}} ثانیه فرصت دارید. اگر حذف شوید هیچ سکه‌ای از این بازی نمی‌گیرید."
+  },
+  "ejected": {
+    "title": "شما از صندلی خود حذف شدید",
+    "bodyTimeout": "بیش از حد بی‌تحرک بودید، بنابراین یک ربات جای شما بازی می‌کند.",
+    "bodyAbandon": "بیش از حد قطع بودید، بنابراین یک ربات جای شما بازی می‌کند.",
+    "bodyKicked": "میزبان شما را از این میز حذف کرد.",
+    "noReward": "از این بازی هیچ سکه‌ای نمی‌گیرید.",
+    "reclaim": "صندلی‌ام را پس بگیر",
+    "reclaimIn": "صندلی‌ام را پس بگیر ({{time}})",
+    "reclaimGone": "این صندلی دیگر قابل بازپس‌گیری نیست.",
+    "reclaimPending": "در پایان این دست به بازی برمی‌گردید.",
+    "returned": "به صندلی خود برگشتید. این بازی اکنون نیمی از پاداش را می‌دهد."
+  },
+  "reward": {
+    "title": "پاداش شما",
+    "awarded": "{{count}} سکه",
+    "zero": "هیچ سکه‌ای از این بازی",
+    "base": "پایه {{game}}",
+    "placement": "رتبه",
+    "premium": "ویژه",
+    "integrity": "سلامت بازی",
+    "repeatDecay": "تکرار حریفان",
+    "duration": "مدت بازی",
+    "earnedBeforeCaps": "کسب‌شده پیش از سقف",
+    "capped": "سقف کسب سکه این مقدار را کم کرد.",
+    "readRule": "مشاهده قانون"
+  },
+  "system": {
+    "memberJoined": "{{name}} وارد شد",
+    "memberLeft": "{{name}} خارج شد",
+    "seatTaken": "{{name}} صندلی {{seat}} را گرفت",
+    "seatReleased": "{{name}} صندلی {{seat}} را رها کرد",
+    "botAdded": "یک ربات صندلی {{seat}} را گرفت",
+    "botRemoved": "ربات صندلی {{seat}} را رها کرد",
+    "playerKicked": "{{name}} از میز حذف شد",
+    "optionsChanged": "میزبان تنظیمات میز را تغییر داد",
+    "playerDisconnected": "ارتباط {{name}} قطع شد",
+    "playerReconnected": "{{name}} برگشت",
+    "gameStarted": "بازی شروع شد",
+    "gameFinished": "بازی تمام شد",
+    "playerEjected": "{{name}} به دلیل بی‌تحرکی حذف شد",
+    "playerReturned": "{{name}} صندلی خود را پس گرفت"
+  },
+  "sync": {
+    "banner": "در حال اتصال دوباره به میز…",
+    "outOfDate": "این صفحه قدیمی است. برای ادامه بازی تازه‌سازی کنید.",
+    "refresh": "تازه‌سازی"
+  }
+}

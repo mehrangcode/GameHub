@@ -1,0 +1,63 @@
+{
+  "brand": "تمپلیت",
+  "nav": {
+    "play": "بازی",
+    "games": "بازی‌ها",
+    "store": "فروشگاه",
+    "customize": "شخصی‌سازی",
+    "wallet": "کیف پول",
+    "premium": "ویژه",
+    "profile": "پروفایل",
+    "primary": "اصلی"
+  },
+  "actions": {
+    "signIn": "ورود",
+    "signUp": "ساخت حساب",
+    "signOut": "خروج",
+    "cancel": "انصراف",
+    "retry": "تلاش دوباره",
+    "copy": "کپی لینک",
+    "copied": "کپی شد",
+    "close": "بستن",
+    "dismiss": "بستن",
+    "back": "بازگشت",
+    "backHome": "بازگشت به بازی‌ها",
+    "newTable": "میز جدید"
+  },
+  "wallet": {
+    "label": "کیف پول",
+    "coin": "سکه",
+    "gem": "الماس",
+    "ticket": "بلیت",
+    "provisional": "تا ثبت‌نام نگه داشته می‌شود"
+  },
+  "theme": {
+    "toggle": "تغییر پوسته",
+    "light": "روشن",
+    "dark": "تیره",
+    "system": "سیستم"
+  },
+  "language": {
+    "switch": "تغییر زبان",
+    "other": "EN"
+  },
+  "presence": {
+    "online": "آنلاین",
+    "away": "غایب",
+    "disconnected": "در حال اتصال",
+    "reconnectingIn": "در حال اتصال… {{time}}"
+  },
+  "state": {
+    "loading": "در حال بارگذاری…",
+    "error": "مشکلی پیش آمد.",
+    "empty": "هنوز چیزی اینجا نیست."
+  },
+  "a11y": {
+    "skipToContent": "رفتن به محتوا",
+    "loading": "در حال بارگذاری"
+  },
+  "notFound": {
+    "title": "صفحه پیدا نشد",
+    "body": "این نشانی به جایی نمی‌رسد. ممکن است منقضی شده باشد."
+  }
+}

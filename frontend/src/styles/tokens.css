@@ -1,0 +1,179 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   DESIGN TOKENS — direction 04 "Aurora Glass"
+   Promoted from Samples/04-aurora-glass.html, which Mehrang picked on
+   2026-09-14. Frosted translucent surfaces over a fixed gradient mesh; light
+   and dark are equally first-class, because the mesh carries the mood and the
+   surfaces are nearly colourless in both.
+
+   ★ This file is the entire theming system (06-frontend-architecture.md §6.1).
+   Every CSS Module consumes these by name and never hard-codes a colour, so a
+   cosmetic is a *data* change: `themeStore` swaps variables at runtime and
+   nothing re-renders. Adding a value here is how the design grows; writing
+   `#6D4AFF` in a component is how it rots.
+
+   ⚠ `backdrop-filter` is the cost centre — it forces compositing on every
+   glass panel. Budgeted at ~12 per screen, and dropped entirely below 560px
+   and under `prefers-reduced-motion` (see global.css).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── palette: light ─────────────────────────────────────────────────── */
+  --color-bg: #eef1f8;
+  --color-surface: rgb(255 255 255 / 62%);
+  --color-surface-raised: rgb(255 255 255 / 78%);
+  --color-surface-sunken: rgb(255 255 255 / 34%);
+  --color-border: rgb(255 255 255 / 70%);
+  --color-border-strong: rgb(93 79 140 / 28%);
+  --color-text: #171429;
+  --color-text-muted: #5c5478;
+  --color-primary: #6d4aff;
+  --color-primary-hover: #5a36f0;
+  --color-primary-soft: rgb(109 74 255 / 12%);
+  --color-on-primary: #fff;
+  --color-accent: #ff5c8a;
+  --color-accent-soft: rgb(255 92 138 / 14%);
+  --color-on-accent: #fff;
+  --color-success: #0e8f6e;
+  --color-success-soft: rgb(14 143 110 / 14%);
+  --color-danger: #d63652;
+  --color-danger-soft: rgb(214 54 82 / 13%);
+  --color-warning: #b8720a;
+  --color-warning-soft: rgb(184 114 10 / 15%);
+  --color-neutral-soft: rgb(93 79 140 / 10%);
+
+  /* the three wallet assets, each with its own identity in every surface */
+  --color-coin: #c2860b;
+  --color-gem: #0e7fa8;
+  --color-ticket: #c23f7a;
+
+  /* ── table semantics ────────────────────────────────────────────────── */
+  --seat-ring-active: var(--color-primary);
+  --seat-ring-idle: var(--color-border-strong);
+  --timer-ok: #0e8f6e;
+  --timer-warn: #b8720a;
+  --timer-danger: #d63652;
+
+  /* ── type ───────────────────────────────────────────────────────────── */
+  --font-display: outfit, vazirmatn, system-ui, sans-serif;
+  --font-body: "DM Sans", vazirmatn, system-ui, sans-serif;
+  --font-numeric: "DM Sans", ui-monospace, monospace;
+
+  /* Swapped in wholesale under `:root:lang(fa)` below. */
+  --font-fa: vazirmatn, system-ui, sans-serif;
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-md: 1.0625rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.625rem;
+  --text-2xl: 2.125rem;
+  --text-3xl: 2.75rem;
+  --leading-tight: 1.2;
+  --leading-body: 1.6;
+
+  /* ── space & shape ──────────────────────────────────────────────────── */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 2.5rem;
+  --space-8: 3.5rem;
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --radius-full: 999px;
+  --shadow-1: 0 1px 1px rgb(23 20 41 / 4%), inset 0 1px 0 rgb(255 255 255 / 55%);
+  --shadow-2: 0 8px 28px -8px rgb(53 38 110 / 22%), inset 0 1px 0 rgb(255 255 255 / 60%);
+  --shadow-3: 0 24px 60px -14px rgb(53 38 110 / 32%), inset 0 1px 0 rgb(255 255 255 / 70%);
+  --blur: 18px;
+  --focus-ring: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-primary);
+  --max-width: 1260px;
+
+  /* ── motion ─────────────────────────────────────────────────────────── */
+  --dur-fast: 140ms;
+  --dur-base: 240ms;
+  --dur-slow: 400ms;
+  --ease: cubic-bezier(0.22, 0.85, 0.3, 1);
+
+  /* ── cosmetics — swapped at runtime by themeStore (06 §6.1) ─────────── */
+  --felt-color: #14663f;
+  --felt-pattern: none;
+  --card-back-image: none;
+  --card-face-set: "classic";
+  --card-radius: 8px;
+  --card-aspect: 5 / 7;
+  --anim-card-deal: 260ms;
+  --anim-card-flip: 180ms;
+
+  /* the aurora itself — a fixed mesh behind everything, painted in global.css */
+  --mesh:
+    radial-gradient(46rem 34rem at 8% 2%, rgb(109 74 255 / 42%), transparent 60%),
+    radial-gradient(40rem 30rem at 94% 8%, rgb(255 92 138 / 36%), transparent 62%),
+    radial-gradient(44rem 32rem at 52% 96%, rgb(34 211 238 / 34%), transparent 62%);
+}
+
+/* ── palette: dark ──────────────────────────────────────────────────────
+   `themeStore` resolves 'system' to a concrete value and stamps
+   `data-theme` on <html>, so there is deliberately no duplicate of this
+   block under `prefers-color-scheme`. One source, one selector.
+   ──────────────────────────────────────────────────────────────────────── */
+:root[data-theme="dark"] {
+  --color-bg: #0c0a18;
+  --color-surface: rgb(255 255 255 / 6.5%);
+  --color-surface-raised: rgb(255 255 255 / 10.5%);
+  --color-surface-sunken: rgb(255 255 255 / 3.5%);
+  --color-border: rgb(255 255 255 / 13%);
+  --color-border-strong: rgb(255 255 255 / 26%);
+  --color-text: #f3f1fb;
+  --color-text-muted: #a79fc6;
+  --color-primary: #a78bfa;
+  --color-primary-hover: #c4b5fd;
+  --color-primary-soft: rgb(167 139 250 / 18%);
+  --color-on-primary: #140b2e;
+  --color-accent: #ff7aa2;
+  --color-accent-soft: rgb(255 122 162 / 18%);
+  --color-on-accent: #2b0713;
+  --color-success: #34d9a8;
+  --color-success-soft: rgb(52 217 168 / 16%);
+  --color-danger: #ff7085;
+  --color-danger-soft: rgb(255 112 133 / 16%);
+  --color-warning: #ffc061;
+  --color-warning-soft: rgb(255 192 97 / 16%);
+  --color-neutral-soft: rgb(255 255 255 / 7%);
+  --color-coin: #ffd16b;
+  --color-gem: #67e8f9;
+  --color-ticket: #f9a8d4;
+  --timer-ok: #34d9a8;
+  --timer-warn: #ffc061;
+  --timer-danger: #ff7085;
+  --shadow-1: 0 1px 1px rgb(0 0 0 / 35%), inset 0 1px 0 rgb(255 255 255 / 8%);
+  --shadow-2: 0 10px 30px -10px rgb(0 0 0 / 60%), inset 0 1px 0 rgb(255 255 255 / 10%);
+  --shadow-3: 0 26px 64px -16px rgb(0 0 0 / 75%), inset 0 1px 0 rgb(255 255 255 / 14%);
+  --felt-color: #0d4a2d;
+  --mesh:
+    radial-gradient(46rem 34rem at 8% 2%, rgb(109 74 255 / 40%), transparent 62%),
+    radial-gradient(40rem 30rem at 94% 8%, rgb(255 92 138 / 26%), transparent 64%),
+    radial-gradient(44rem 32rem at 52% 96%, rgb(34 211 238 / 24%), transparent 64%);
+}
+
+/* Persian sets the whole stack to Vazirmatn: Outfit and DM Sans have no Arabic
+   coverage, so leaving them first would fall back per-glyph and mix two faces
+   inside a single word. */
+:root:lang(fa) {
+  --font-display: var(--font-fa);
+  --font-body: var(--font-fa);
+  --font-numeric: var(--font-fa);
+}
+
+/* Motion is a preference, and the glass is the most expensive thing here. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-slow: 0ms;
+    --anim-card-deal: 0ms;
+    --anim-card-flip: 0ms;
+  }
+}

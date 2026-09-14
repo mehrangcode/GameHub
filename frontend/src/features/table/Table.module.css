@@ -1,0 +1,462 @@
+/* The shell sits inside AppShell's <main>, which already supplies the page
+   gutter and max width. Only the vertical rhythm belongs here. */
+.shell {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.layout {
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (width >= 1024px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr) 320px;
+    align-items: start;
+  }
+}
+
+/* ── header ──────────────────────────────────────────────────────────────── */
+
+.header {
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-raised);
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.headerTitles {
+  min-inline-size: 0;
+}
+
+.gameName {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 700;
+}
+
+.tableMeta {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.headerActions {
+  margin-inline-start: auto;
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* ── seats ───────────────────────────────────────────────────────────────── */
+
+.seats {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.seat {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  padding-inline-end: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+  transition: all var(--dur-fast) var(--ease);
+  min-inline-size: 0;
+}
+
+/* The acting seat. A ring plus a lift, never colour alone — the same rule that
+   keeps suit colour from being the only differentiator on a card. */
+.seat[data-turn="true"] {
+  border-color: var(--seat-ring-active);
+  background: var(--color-primary-soft);
+  box-shadow: var(--shadow-2);
+}
+
+.seat[data-empty="true"] {
+  border-style: dashed;
+  color: var(--color-text-muted);
+}
+
+.seatPic {
+  inline-size: 36px;
+  block-size: 36px;
+  border-radius: var(--radius-full);
+  display: grid;
+  place-items: center;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  background: var(--color-neutral-soft);
+  color: var(--color-text-muted);
+  position: relative;
+  flex: none;
+}
+
+.seat[data-turn="true"] .seatPic {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.seatBody {
+  min-inline-size: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.seatName {
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Your own seat is bolded. Declared after `.seatName` so specificity ascends
+   in source order, which is what stylelint's no-descending-specificity wants
+   and what keeps the cascade readable. */
+.seat[data-self="true"] .seatName {
+  font-weight: 700;
+}
+
+.seatTags {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.tag {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  padding-block: 2px;
+  padding-inline: var(--space-2);
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+}
+
+.tagBot {
+  background: var(--color-neutral-soft);
+  color: var(--color-text-muted);
+}
+
+.tagWarn {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
+.tagTeam {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.seatAction {
+  margin-inline-start: auto;
+  flex: none;
+}
+
+.presenceDot {
+  position: absolute;
+  inset-block-end: 0;
+  inset-inline-end: 0;
+  inline-size: 11px;
+  block-size: 11px;
+  border-radius: var(--radius-full);
+  border: 2px solid var(--color-bg);
+}
+
+.presenceDot[data-state="online"] {
+  background: var(--color-success);
+}
+
+.presenceDot[data-state="away"] {
+  background: var(--color-warning);
+}
+
+.presenceDot[data-state="disconnected"] {
+  background: var(--color-danger);
+}
+
+/* ── turn timer ──────────────────────────────────────────────────────────── */
+
+.timerWrap {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: center;
+}
+
+.timer {
+  position: relative;
+  inline-size: 92px;
+  block-size: 92px;
+  display: grid;
+  place-items: center;
+}
+
+.timer svg {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  transform: rotate(-90deg);
+}
+
+/* Mirrored under RTL so the ring drains in the reading direction. */
+html[dir="rtl"] .timer svg {
+  transform: rotate(-90deg) scaleY(-1);
+}
+
+.timerTrack {
+  stroke: var(--color-border-strong);
+  stroke-width: 6;
+  fill: none;
+}
+
+.timerFill {
+  stroke-width: 6;
+  fill: none;
+  stroke-linecap: round;
+  transition:
+    stroke-dashoffset 1s linear,
+    stroke var(--dur-base);
+}
+
+.timerValue {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.timerCaption {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.strikes {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.pip {
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-border-strong);
+}
+
+.pip[data-struck="true"] {
+  background: var(--color-warning);
+}
+
+/* ── game surface ────────────────────────────────────────────────────────── */
+
+.surface {
+  min-block-size: 240px;
+  padding: var(--space-6);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-sunken);
+  display: grid;
+  place-items: center;
+  text-align: center;
+  color: var(--color-text-muted);
+  gap: var(--space-3);
+}
+
+/* ── banners and panels ──────────────────────────────────────────────────── */
+
+.banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+}
+
+.bannerWarn {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
+.bannerDanger {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.bannerInfo {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.panel {
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  display: grid;
+  gap: var(--space-4);
+}
+
+.panelTitle {
+  font-size: var(--text-base);
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+.ejection {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+}
+
+/* ── reward summary ──────────────────────────────────────────────────────── */
+
+.rewardTotal {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.rewardPaid {
+  color: var(--color-coin);
+}
+
+.rewardZero {
+  color: var(--color-text-muted);
+}
+
+.factors {
+  display: grid;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.factor {
+  display: flex;
+  gap: var(--space-3);
+  color: var(--color-text-muted);
+}
+
+.factorValue {
+  margin-inline-start: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+}
+
+/* ★ The forfeiture explanation. It has to read as a published rule rather than
+   a bug, which is why it gets its own block, an icon, and a link to the rule —
+   not a grey footnote under a zero. */
+.forfeitNote {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  padding: var(--space-4);
+  background: var(--color-danger-soft);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+}
+
+.forfeitNote a {
+  color: var(--color-danger);
+  font-weight: 700;
+}
+
+/* ── chat ────────────────────────────────────────────────────────────────── */
+
+.chat {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-block-size: 26rem;
+}
+
+.chatLog {
+  overflow-block: auto;
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+  font-size: var(--text-sm);
+  min-block-size: 8rem;
+}
+
+.chatLine {
+  display: grid;
+  gap: 2px;
+}
+
+.chatAuthor {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.chatSystem {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.chatPending {
+  opacity: 0.6;
+}
+
+.chatFailed {
+  color: var(--color-danger);
+}
+
+.chatForm {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.chatInput {
+  flex: 1;
+  min-inline-size: 0;
+  min-block-size: 42px;
+  padding-inline: var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+  color: var(--color-text);
+  font: inherit;
+}
+
+/* ── nudge ───────────────────────────────────────────────────────────────── */
+
+.nudge {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-primary);
+  position: relative;
+}
+
+.nudgeTitle {
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--color-coin);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.nudgeBody {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.nudgeClose {
+  position: absolute;
+  inset-block-start: var(--space-2);
+  inset-inline-end: var(--space-2);
+}

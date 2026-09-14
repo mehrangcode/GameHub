@@ -1,0 +1,109 @@
+.wrap {
+  position: relative;
+  z-index: 1;
+  min-block-size: 100dvb;
+  display: grid;
+  place-items: center;
+  padding-block: var(--space-6);
+  padding-inline: var(--space-4);
+}
+
+.card {
+  inline-size: 100%;
+  max-inline-size: 28rem;
+  padding: var(--space-6);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-3);
+  display: grid;
+  gap: var(--space-5);
+}
+
+.art {
+  inline-size: 72px;
+  block-size: 72px;
+  border-radius: var(--radius-lg);
+  margin-inline: auto;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, var(--color-primary), var(--color-accent));
+  color: #fff;
+  box-shadow: var(--shadow-2);
+  font-size: var(--text-2xl);
+}
+
+.head {
+  display: grid;
+  gap: var(--space-2);
+  text-align: center;
+}
+
+.title {
+  font-size: var(--text-xl);
+}
+
+.meta {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  display: flex;
+  gap: var(--space-3);
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.metaItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.form {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.formError {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+/* ★ "No account needed" is the single most important sentence on this page.
+   It sits directly under the primary button, where the eye lands after it. */
+.reassure {
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.foot {
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+/* Sign-in is a text link and never a competing button — 06 §2.1. Two buttons
+   here is how you turn a five-second join into a decision. */
+.foot a {
+  color: var(--color-primary);
+  font-weight: 700;
+  text-decoration: none;
+  margin-inline-start: var(--space-2);
+}
+
+.notice {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: center;
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.noticeIcon {
+  color: var(--color-warning);
+}

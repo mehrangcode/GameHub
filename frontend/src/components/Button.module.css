@@ -1,0 +1,98 @@
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+
+  /* 46px keeps every control above the 44px touch target minimum. */
+  min-block-size: 46px;
+  padding-inline: var(--space-6);
+  border-radius: var(--radius-full);
+  font-weight: 700;
+  font-size: var(--text-base);
+  white-space: nowrap;
+  transition: all var(--dur-fast) var(--ease);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.primary {
+  background: linear-gradient(135deg, var(--color-primary), var(--color-accent));
+  color: #fff;
+  box-shadow: var(--shadow-2);
+}
+
+.primary:hover:not(:disabled) {
+  box-shadow: var(--shadow-3);
+  transform: translateY(-1px);
+}
+
+.primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.quiet {
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-text);
+  background: var(--color-surface-sunken);
+}
+
+.quiet:hover:not(:disabled) {
+  background: var(--color-surface);
+  border-color: var(--color-primary);
+}
+
+.ghost {
+  color: var(--color-text-muted);
+  padding-inline: var(--space-4);
+}
+
+.ghost:hover:not(:disabled) {
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.danger {
+  border: 1px solid var(--color-danger);
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
+.block {
+  inline-size: 100%;
+}
+
+.small {
+  min-block-size: 36px;
+  padding-inline: var(--space-4);
+  font-size: var(--text-sm);
+}
+
+/* An icon-only control is square, so the label lives in `title` instead. */
+.iconOnly {
+  inline-size: 40px;
+  block-size: 40px;
+  min-block-size: 40px;
+  padding-inline: 0;
+  border-radius: var(--radius-full);
+}
+
+/* The pending spinner. Deliberately a border trick rather than an SVG: it
+   inherits currentColor and costs no extra request. */
+.spinner {
+  inline-size: 1em;
+  block-size: 1em;
+  border: 2px solid currentcolor;
+  border-block-start-color: transparent;
+  border-radius: var(--radius-full);
+  animation: spin 700ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

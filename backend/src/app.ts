@@ -13,6 +13,7 @@ import { buildAuthRouter } from './interface/http/routes/auth.routes.js'
 import { buildGamesRouter } from './interface/http/routes/games.routes.js'
 import { buildHealthRouter } from './interface/http/routes/health.routes.js'
 import { buildInvitesRouter } from './interface/http/routes/invites.routes.js'
+import { buildMeRouter } from './interface/http/routes/me.routes.js'
 import { buildProbeRouter } from './interface/http/routes/probe.routes.js'
 import { buildTablesRouter } from './interface/http/routes/tables.routes.js'
 import { buildWalletRouter } from './interface/http/routes/wallet.routes.js'
@@ -103,6 +104,9 @@ export function buildApp(container: Container): Express {
   app.use(health)
   app.use(API_PREFIX, health)
   app.use(API_PREFIX, buildAuthRouter(container))
+  // S40 — `GET/PUT /me/preferences` (U). Guests persist to localStorage and
+  // carry their choices in through the claim, so there is no guest path here.
+  app.use(API_PREFIX, buildMeRouter(container))
   app.use(API_PREFIX, buildGamesRouter(container))
   app.use(API_PREFIX, buildTablesRouter(container))
   // S37 — `GET /wallet` (G), `/wallet/transactions` (U), `/rewards/rules` (P).

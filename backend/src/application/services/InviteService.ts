@@ -3,6 +3,7 @@ import type {
   CreateInviteRequest,
   InviteResponse,
   PublicInviteResponse,
+  RedeemInviteResponse,
 } from '../../contracts/dto/invites.js'
 import type { Invite } from '../../domain/entities/table.js'
 import {
@@ -160,6 +161,60 @@ export class InviteService {
       inProgress: table.status === 'IN_PROGRESS',
       allowSpectators: table.allowSpectators,
       requireApproval: table.requireApproval,
+    }
+  }
+
+  /**
+   * ★ The authenticated redeem — S43.
+   *
+   * `resolve` deliberately withholds `tableId` so a leaked code does not also
+   * leak the table's identifier. That is right for the pre-join screen, and it
+   * left a signed-in user with nowhere to go: the guest path hands back a
+   * `redirectTo`, and a user who clicked the same link had no equivalent short
+   * of becoming a guest — which would strand their coins in a provisional
+   * wallet and log them out of their own account.
+   *
+   * Failures answer **exactly as `resolve` does**, through the same `refuse`,
+   * so adding this route does not turn the code space into something an
+   * authenticated attacker can enumerate more cheaply than an anonymous one.
+   *
+   * ★ **It consumes no use, deliberately.** `maxUses` counts guest *identities*
+   * minted against the link (`GuestSessionService.create` consumes); the public
+   * `resolve` consumes nothing, and this is a resolve with a `tableId` attached
+   * rather than an identity mint. Consuming here would mean a signed-in user
+   * who refreshes the invite page twice burns two uses of a `maxUses: 2` link
+   * and locks out the friend it was minted for.
+   *
+   * Guarding that with an "are they already a member?" check was the first
+   * attempt and does not work: membership is created by `table:join` over the
+   * socket, not here, so on the REST path the guard never fires. `alreadyMember`
+   * survives as *information* — it lets the client say "rejoin" rather than
+   * "join" — but nothing is gated on it.
+   */
+  async redeemForUser(
+    code: string,
+    userId: string,
+    context: RequestContext = {},
+  ): Promise<RedeemInviteResponse> {
+    const now = this.now()
+    const invite = await this.deps.repos.invites.findValidByCode(code, now)
+    if (invite === null) return this.refuse(context, 'INVITE_NOT_USABLE')
+
+    const table = await this.deps.repos.tables.findById(invite.tableId)
+    if (table === null || table.closedAt !== null || table.status === 'CLOSED') {
+      return this.refuse(context, 'TABLE_UNAVAILABLE')
+    }
+
+    const members = activeMembers(await this.deps.repos.tables.listMembers(table.id))
+    const alreadyMember = members.some((member) => member.userId === userId)
+
+    this.deps.metrics.increment('invites_redeemed')
+
+    return {
+      tableId: table.id,
+      // Server-decided, exactly as on the guest and claim responses.
+      redirectTo: `/table/${table.id}`,
+      alreadyMember,
     }
   }
 

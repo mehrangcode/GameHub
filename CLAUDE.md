@@ -4,30 +4,37 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository State
 
-**M0 Phases A–I (S01–S38) are built.** `backend/` and `frontend/` exist, with **1674 backend tests**
-green: TS-strict scaffolds and the architecture lint guards, the Zod-validated environment, the
-`contracts/` mirror + drift guard, the full Prisma schema and idempotent seed, the repository set
-behind one contract suite run against both fakes and SQLite, cookie auth with refresh rotation and
-table-bound guest tokens, the game catalog, table/invite/seat lifecycle, the wallet ledger with
-derived idempotency and caps, the guest→user claim transaction, the Socket.IO gateway with the room
-model / presence / chat / optional Redis, the append-only event log (the `_fixture` engine, seed
-commitment, `GameSessionService`'s move pipeline, snapshots and resync, per-viewer projection),
-turn enforcement (absolute deadlines that survive a restart, the private warning, the strike ladder,
-ejection with bot substitution, seat reclamation), and — as of Phase I — the economy: the pure
-reward formula, per-seat idempotent settlement with forfeiture, live repeat-matchup decay and the
-premium multiplier, wallet reads plus the public rate card, the row-locked debit path, guest
-forfeiture, and a reconciliation job that detects a corrupted balance and refuses to repair it.
+**M0 Phases A–J (S01–S44) are built.** `backend/` and `frontend/` exist, with **1707 backend
+tests** and **154 frontend tests** green: TS-strict scaffolds and the architecture lint guards, the
+Zod-validated environment, the `contracts/` mirror + drift guard, the full Prisma schema and
+idempotent seed, the repository set behind one contract suite run against both fakes and SQLite,
+cookie auth with refresh rotation and table-bound guest tokens, the game catalog, table/invite/seat
+lifecycle, the wallet ledger with derived idempotency and caps, the guest→user claim transaction,
+the Socket.IO gateway with the room model / presence / chat / optional Redis, the append-only event
+log (the `_fixture` engine, seed commitment, `GameSessionService`'s move pipeline, snapshots and
+resync, per-viewer projection), turn enforcement (absolute deadlines that survive a restart, the
+private warning, the strike ladder, ejection with bot substitution, seat reclamation), the economy
+(the pure reward formula, per-seat idempotent settlement with forfeiture, live repeat-matchup decay
+and the premium multiplier, wallet reads plus the public rate card, the row-locked debit path,
+guest forfeiture, and a reconciliation job that detects a corrupted balance and refuses to repair
+it), and — as of Phase J — **the frontend**: the single-flight refresh interceptor, the
+`contracts/`-schema-driven auth forms, the "Aurora Glass" token system with self-hosted fonts, full
+`en`/`fa` i18n with real RTL, the registry-driven welcome page, the one-socket manager with `seq`
+recovery, the invite landing and guest join, and the shared `TableShell`.
 
-**All three of M0's headline exit criteria now run:** an idle player is warned, struck twice,
-ejected, replaced by a bot, and the table plays on; **an ejected player on a winning team earns 0
-while their partner earns in full**; and a corrupted `Wallet.balance` is detected and alerted.
+**All three of M0's headline exit criteria run, and the third is now clickable:** an idle player is
+warned, struck twice, ejected, replaced by a bot, and the table plays on; **an ejected player on a
+winning team earns 0 while their partner earns in full**; a corrupted `Wallet.balance` is detected
+and alerted; and the welcome page renders its cards from `GET /api/v1/games`, so a sixth game needs
+no frontend deploy.
 
-No `admin-frontend/` yet (that is milestone MA). The next session is **S39** — Axios, single-flight
-refresh, `authStore` and the login/register forms, which starts Phase J, the frontend. See
-`.claude/context/build/context.md`, which is the live cursor and is read first, every session.
+No `admin-frontend/` yet (that is milestone MA). The next session is **S45** — Dockerfiles, dev
+compose and CI, which starts Phase K. See `.claude/context/build/context.md`, which is the live
+cursor and is read first, every session.
 
 `Documents/` holds the complete, cross-referenced PRD set for the platform **plus its admin
 console**; `Documents/08-roadmap.md` and `Documents/11-build-plan.md` drive the work.
+`Documents/13-design-system.md` is the adopted visual language and governs any UI change.
 
 `Documents/README.md` is the entry point: it holds the document index, the **Decisions Already
 Locked** table, a requirement→document coverage map, and the **Status** table of open questions.
@@ -51,6 +58,7 @@ with it, the other document is wrong and should be corrected — do not "average
 | `Documents/08-roadmap.md` | Milestones M0–M8 + MA (admin console) with scope + exit criteria, backlog order, cross-milestone Definition of Done | Start of every work session |
 | `Documents/11-build-plan.md` | **Session layer under the roadmap** — M0 as 50 numbered 2–3 h sessions (goal, build, tests, *You verify* steps, done-when); M1–M8 and MA outlined. §0 has the daily protocol | Start of every work session, with the cursor below |
 | `Documents/12-admin-console.md` | **The second application** — admin entrypoint on an unpublished `:3100`, `admin-frontend/`, moderation, ledger oversight, game on/off, reports, TOTP + append-only audit log. §11 is the delivery split | Anything admin-facing |
+| `Documents/13-design-system.md` | **The adopted visual language** — "Aurora Glass" (sample 04): token reference, the `.glass` primitive, button variants, the RTL mirror/do-not-mirror table, numerals and dates, and the rules for extending it | Any UI work |
 | `.claude/context/build/{plan.md,context.md}` | The live cursor: last session, next session, decisions, blockers, inherited open questions | **Read `context.md` first, before anything else** |
 | `Documents/09-matchmaking.md` | Queue pools, presets, 120 s timeout release, bot fill, parties, backfill, farming guards, cooldowns | Matchmaking work |
 | `Documents/10-economy-and-rewards.md` | Wallet + append-only ledger, reward formula, forfeiture on ejection, guest vesting, store, sinks, premium, legal boundaries | Anything involving coins |

@@ -1,4 +1,8 @@
 import {
+  DEFAULT_PREFERENCES,
+  type PreferencesResponse,
+} from '../../contracts/dto/preferences.js'
+import {
   ANIMATION_SPEEDS,
   LOCALES,
   NUMERAL_SYSTEMS,
@@ -65,4 +69,38 @@ export function preferencesFromGuest(
   patch.locale = localeOverride ?? guest.locale
 
   return patch as Partial<UserPreferences>
+}
+
+/**
+ * `UserPreferences` → the wire shape — S40.
+ *
+ * A `null` row is a user who has never changed a setting, which is a valid
+ * state the repository documents. Answering with the defaults rather than a
+ * 404 means a brand-new account's settings page renders instead of erroring,
+ * and `updatedAt` is the epoch so a client can tell "never saved" from "saved
+ * long ago" without a nullable field.
+ *
+ * `extra` is deliberately not published. It is migration headroom (03 §3.1),
+ * not a bag of settings for clients to discover — anything a client should read
+ * gets a named column and a contract field.
+ */
+export function toPreferencesResponse(row: UserPreferences | null): PreferencesResponse {
+  if (row === null) {
+    return { ...DEFAULT_PREFERENCES, updatedAt: new Date(0).toISOString() }
+  }
+
+  return {
+    theme: row.theme,
+    locale: row.locale,
+    numeralSystem: row.numeralSystem,
+    cardBackId: row.cardBackId,
+    cardFaceId: row.cardFaceId,
+    feltId: row.feltId,
+    animationSpeed: row.animationSpeed,
+    soundEnabled: row.soundEnabled,
+    soundVolume: row.soundVolume,
+    showLegalMoveHints: row.showLegalMoveHints,
+    reducedMotion: row.reducedMotion,
+    updatedAt: row.updatedAt.toISOString(),
+  }
 }

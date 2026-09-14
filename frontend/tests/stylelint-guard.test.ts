@@ -14,7 +14,11 @@ describe('logical-CSS enforcement', () => {
     expect(config.rules['plugin/use-logical-properties-and-values']).toBeTruthy()
   })
 
-  it('rejects margin-left in a stylesheet', async () => {
+  // Stylelint's first `lint()` call loads its whole rule set and takes ~2 s,
+  // which exceeds the 5 s default once the suite runs files in parallel. It is
+  // a startup cost, not a slow assertion, so the timeout is raised rather than
+  // the test weakened — this was an intermittent failure before Phase J.
+  it('rejects margin-left in a stylesheet', { timeout: 30_000 }, async () => {
     const result = await stylelint.lint({
       code: '.a { margin-left: 1rem; }',
       codeFilename: 'src/probe.module.css',
@@ -25,7 +29,7 @@ describe('logical-CSS enforcement', () => {
     expect(rules).toContain('plugin/use-logical-properties-and-values')
   })
 
-  it('accepts the logical equivalent', async () => {
+  it('accepts the logical equivalent', { timeout: 30_000 }, async () => {
     const result = await stylelint.lint({
       code: '.a { margin-inline-start: 1rem; }',
       codeFilename: 'src/probe.module.css',

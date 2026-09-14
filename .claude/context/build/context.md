@@ -1,20 +1,21 @@
 # Live Context — read this first, every session
 
-**Last updated:** 2026-09-13
+**Last updated:** 2026-09-14
 
 ## Where we are
 
 | | |
 |---|---|
 | **Milestone** | M0 — Platform Skeleton |
-| **Last session completed** | **S01–S38 (Phases A + B + C + D + E + F + G + H + I) built and green — not yet verified by Mehrang** |
-| **Next session** | **S39 — Axios, single-flight refresh, `authStore`, login/register** (3 h, 🖱️) — starts Phase J, the frontend |
+| **Last session completed** | **S01–S44 (Phases A–J) built and green — Phase J not yet verified by Mehrang** |
+| **Next session** | **S45 — Dockerfiles, dev compose, CI** (3 h, 🖥️) — starts Phase K, ship |
 | **Blocked on** | Nothing in code. The two older environment items only (port 3000, Playwright deps) |
-| **Repo state** | `backend/` and `frontend/` exist. **1657 backend tests**, 18 frontend tests. No `admin-frontend/` (MA) |
+| **Repo state** | `backend/` and `frontend/` exist. **1707 backend tests**, **154 frontend tests**. No `admin-frontend/` (MA) |
 
-Session spec for S39: `Documents/11-build-plan.md` §12.
+Session spec for S45: `Documents/11-build-plan.md` §12.
 
-**Both of M0's headline exit criteria now run.**
+**All three of M0's headline exit criteria run, and the third one is now
+clickable** — the welcome page renders its cards from `GET /api/v1/games`.
 
 *An idle player is warned, struck twice, ejected, replaced by a bot, and the table
 plays on to a finish* — `tests/integration/ejection.test.ts` walks that sentence,
@@ -29,6 +30,84 @@ pipeline does it.
 invariant E1 on purpose and `scripts/dev-reconcile.ts` catches it. **This one is
 worth doing by hand**; it is two commands and it is the whole economy's
 foundation.
+
+## Phase J — what to verify (the gate for S39–S44)
+
+**The design direction is settled.** Mehrang chose `Samples/04-aurora-glass.html`
+on 2026-09-14; its tokens are now `frontend/src/styles/tokens.css` and
+`Documents/13-design-system.md` explains the system and the rules for extending
+it. Fonts are **self-hosted** (`frontend/scripts/fetch-fonts.mjs` regenerates
+them) so no page load reaches a third party.
+
+```bash
+cd frontend
+npm run typecheck && npm run lint && npm test        # 154 tests, 12 files
+npm run build                                        # ~150 kB gzip entry chunk
+```
+
+**The names to read, in order of what they protect:**
+
+| Test | What breaks without it |
+|---|---|
+| `★ five concurrent 401s trigger EXACTLY ONE /auth/refresh` | S14 **rotates** refresh tokens and kills the family on reuse, so five parallel refreshes are read as a stolen-token replay — and the user is signed out for loading a page with five widgets |
+| `★ a sixth game the frontend has never heard of appears — P5 on the client` | The welcome page quietly becomes a hard-coded list, and game #6 needs a frontend deploy |
+| `★ every en key in "<ns>" has a fa counterpart` | Persian rots **silently**: nobody on the team reads the Persian build, so a failing test is the only thing that notices |
+| `★ every i18nKey the backend can emit renders in en` / `…and in fa` | Greps the **backend source** for the keys it actually sends. A key the server sends and the client cannot render is untranslatable prose in front of a user |
+| `★ renders the true remaining time when the device clock is 10 minutes fast` | The highest-stakes number in the UI. A skewed clock shows a player time they do not have, and that deadline costs them the seat *and* the coins |
+| `★★ a forfeited zero is EXPLAINED, with its reason and a link to the rule` | A silent zero is indistinguishable from a broken payout — and a player who assumes a bug is *correct* to, because a bug looks the same |
+| `★ /table/:tableId is RequireIdentity, NOT RequireUser — guests may play` | The signup wall comes back, silently, via a well-meaning refactor |
+| `★ /t/:inviteCode has NO guard` | Journey J1→J2 dies: the link stops working in a private window |
+| `renders the same message for an expired code and an unknown one` | The UI undoes the server's own care and becomes an oracle for enumerating live invite codes (07 §5.2) |
+| `★ switching to fa sets BOTH <html lang> and <html dir>` | Nothing mirrors. Every piece of layout assumes this one attribute is right |
+| `★ the no-derivation rule (P1)` | Reads `gameStore`'s own source and fails on `reduce`, `52 -`, `% 4`, `trump`. Crude, and the only thing that catches "I just needed the remaining card count" before it ships |
+| `★ creates EXACTLY ONE socket across many acquires` | StrictMode opens a second and fast refresh a third; everything then works *twice*, which is miserable to debug |
+| `★ consumes NO invite use — a refresh must not burn the link` | A signed-in user refreshing the invite page burns two uses of a `maxUses: 2` link and locks out the friend it was for |
+
+```bash
+# S39 — the refresh, and the shared-schema forms.
+npx vitest run tests/api/client.test.ts tests/features/auth.test.tsx --reporter=verbose
+
+# S40 — parity, and the backend-key sweep. Delete a fa key and watch it fail.
+npx vitest run tests/i18n tests/stores/themeStore.test.ts tests/lib --reporter=verbose
+
+# S41 — registry-driven, including the sixth game.
+npx vitest run tests/features/welcome.test.tsx --reporter=verbose
+
+# S42 — seq handling and the one-socket rule.
+npx vitest run tests/stores/gameStore.test.ts tests/socket --reporter=verbose
+
+# S43 + S44 — the invite screen and the table shell.
+npx vitest run tests/features/invite.test.tsx tests/features/table.test.tsx --reporter=verbose
+```
+
+### Live — the part worth doing by hand
+
+```bash
+cd backend && PORT=3999 npm run dev        # port 3000 is occupied on this machine
+# then, in frontend/, point the proxy at 3999 or free 3000, and:
+cd frontend && npm run dev                  # :5173
+```
+
+1. **`/` — the welcome page.** Five cards, all *Coming soon*, each with its
+   published coin rate from the **public** `GET /rewards/rules`.
+   ★ Then add a fake sixth game to `backend/src/domain/games/registry.ts`,
+   restart the backend, and **refresh the browser**: a sixth card appears with
+   no frontend change at all.
+2. **The فا button.** The whole layout mirrors — nav, forms, spacing, the timer
+   ring's drain direction. DevTools should show `<html dir="rtl" lang="fa">`.
+   Reload: the choice persists. ★ Nothing should be clipped or half-mirrored;
+   if something is, find the physical CSS property rather than adding an
+   override.
+3. **`/register`.** Type a 5-character password → the message is
+   *"Use at least 10 characters."*, which is the **server's own key**
+   rendered client-side. Switch to Persian and do it again.
+4. **Reload while signed in** — still signed in. DevTools → Application →
+   Cookies: `access`/`refresh` are `httpOnly`, and **localStorage holds no
+   token** (only `preferences`, `locale`, `guestName`, `dismissedNudges`).
+5. **★★ The invite journey, in a private window.** Create a table and an invite
+   (see `requests/tables.http`), open `/t/<CODE>` in a private window, type a
+   name, click **Play now**. You are at the table with **no account**. Reload —
+   still there. Then use the signup nudge and land **back in the same seat**.
 
 ## Phase I — what to verify (the gate for S35–S38)
 
@@ -825,6 +904,37 @@ What *is* fixed: nothing in the repo depends on `node_modules/.bin` shims any mo
 hook (S178), `contracts:sync`/`check`, the test global setup and the seed test all spawn
 `node <resolved cli.js>` — see `tests/bin.ts`. So the failure you get from Windows is now an honest
 "missing Prisma engine for this platform" rather than a misleading `ENOENT` on `npx`.
+
+## Decisions made while building Phase J (2026-09-14)
+
+| Decision | Value | Why |
+|---|---|---|
+| **★ Direction 04 "Aurora Glass" adopted whole** | `frontend/src/styles/tokens.css` + `Documents/13-design-system.md` | **Mehrang's choice.** All five samples declared the same token *names*, so picking one was a values decision rather than an architecture one — which is exactly what made the promotion a copy of two `:root` blocks instead of a restyling exercise |
+| **Tokens landed BEFORE S39, not at S40 as scheduled** | Mehrang's call | The alternative was building the auth forms against the S02 placeholder styling and restyling them a session later. The build plan's order assumed the design was still open; it was not |
+| **★ Fonts are self-hosted, not CDN** | `scripts/fetch-fonts.mjs` → 15 woff2, 584 KB | No third-party request on page load, the container builds offline, and Vazirmatn ships only the subsets a Persian reader needs. Each face is `unicode-range`-scoped, so an English reader downloads none of the Arabic ones. **Mehrang's choice** |
+| **★ `:root:lang(fa)` swaps the WHOLE font stack** | not just a fallback append | Outfit and DM Sans have no Arabic coverage. Leaving them first falls back per-glyph and mixes two faces inside a single Persian word — a subtle, ugly bug that only a Persian reader would report |
+| **★ `themeStore` resolves `'system'`; `tokens.css` has ONE dark block** | no `prefers-color-scheme` duplicate | The store stamps a concrete `data-theme`, so the dark palette has exactly one selector. Duplicating it under a media query is how the two copies drift, and the drift is invisible until somebody toggles |
+| **★ The i18next namespace IS the first segment of every server key** | `errors.*`, `table.*`, `games.*` | `errors.field.tooBig` splits into `errors:field.tooBig` with no mapping table to maintain. `translateServerKey` is the one place a wire key becomes words, and an unknown key degrades to the generic message rather than printing raw debug output at a user |
+| **★ `ZOD_ISSUE_KEYS` moved into `contracts/`** | `contracts/validation.ts` | The forms validate with the **same schemas** the server does, so they must produce the **same message**. A third consumer appeared (the browser) and the table had to stop living behind the REST boundary. `i18nKeyFor` stayed in `interface/`, since `contracts/` may not declare functions |
+| **★ A hand-written localized Zod resolver, not `@hookform/resolvers`** | `lib/zodResolver.ts` | Configuring that library's error map to reach the same table would hide the one thing this file exists to guarantee. The mapping is four lines; the alternative is four lines of indirection |
+| **★ Gap detection tolerates a hole of exactly ONE** | `SEQ_GAP_TOLERANCE = 1` | `seq` is **not contiguous on any channel**: the server persists a turn deadline as an event and deliberately does not narrate it (`isTimerEvent`), so a one-number hole is the ordinary case *once per turn*. A strict `seq === last + 1` rule would resync on every single turn of every match |
+| **…and the heuristic is not what makes recovery correct** | resync on `connect` + on `game:syncRequired` | On a live socket.io connection delivery is ordered and reliable, so the only way to miss a message is a disconnect — and the transport tells us when one ends. The seq rule is a belt to that braces |
+| **★ `game:state` is applied even when a gap is detected** | newest state wins | It is a *complete* projection, not a delta. Holding it back to wait for a narration backfill would freeze the board to preserve a move log |
+| **★ The socket is reference-counted and never closed on release** | `socketManager.acquire/release` | Navigating table → lobby → table must not renegotiate a websocket. An idle connection costs the server almost nothing; a reconnect costs the player a resync |
+| **★ `axios.isAxiosError`, never `instanceof AxiosError`** | caught by the test suite | The class identity check fails silently whenever two copies of axios exist, and the failure mode is *every* server error becoming an opaque INTERNAL with no refresh ever attempted. It cost an hour to see, and it would have cost far more in production |
+| **★ `GET/PUT /me/preferences` had to be BUILT — S40 assumed it existed** | `me.routes.ts`, level **U** | The build plan says "wired"; the route did not exist. `IPreferencesRepository` and the Prisma model already did, so it was small. **`requireUser`, not `requireIdentity`**: a guest has no row, their choices live in `localStorage`, and they arrive with the claim (03 §6.1 step 3) |
+| **★ `POST /invites/:code/redeem` had to be built too** | `invites.routes.ts`, level **U** | S43 asks for "a signed-in-user path" and there was none: `resolve` withholds `tableId` from *everyone* (correct — a leaked code must not leak the table id), which left a user with no way in short of becoming a guest and stranding their coins in a provisional wallet |
+| **★★ …and it consumes NO invite use** | corrected mid-session | The first version consumed one, guarded by an "already a member?" check. **That guard never fires**: membership is created by `table:join` over the *socket*, not by this route. So a user refreshing the invite page would burn two uses of a `maxUses: 2` link and lock out the friend it was minted for. `maxUses` counts guest *identities* minted against a link; this route mints none, so it consumes none — same as the public resolve |
+| **Failures answer byte-identically to the public resolve** | the same `refuse` | An account must not be a cheaper oracle for enumerating live codes than anonymity is (07 §5.2). Asserted by comparing the two bodies directly |
+| **★ `formatNumber` keeps fractions for multipliers** | `maximumFractionDigits`, default 0 | Caught by a test: the integer default rendered a 1.5× premium as **"×2"** and a 0.6× decay as "×1", so the reward breakdown contradicted the total it existed to explain — on the one screen whose whole job is making the arithmetic checkable (10 §11) |
+| **★ Ids and codes are never converted to Persian digits** | structural, not a flag | `format.ts` exposes no function that would convert an identifier. An invite code in Persian digits is untypeable and unsearchable |
+| **★ Route guards are components, not loaders** | `RequireIdentity` / `RequireUser` | A loader runs once, at navigation. Identity can be lost **mid-session** — a refresh that fails while the tab sits open — and a component re-renders when the store changes, so the redirect happens then too |
+| **A guest hitting `RequireUser` goes to `/register`, not `/login`** | `guards.tsx` | They have no account to sign into. "Sign in" is a dead end that reads as a rejection at the exact moment we are asking them to convert |
+| **★ `themeStore` is the ONLY thing that writes `document.documentElement`** | one `subscribeWithSelector` | That is what makes a cosmetic a variable swap with no re-render (06 §6.1), rather than a prop threaded through forty components |
+| **Bootstrap runs at module scope, not in a `useEffect`** | `main.tsx` | It starts during module evaluation instead of after first paint, and StrictMode's double-invoke cannot double it. `status: 'unknown'` holds the guards until it resolves, so a valid session never flashes the signed-out chrome |
+| **★ No optimistic game updates; chat IS optimistic** | `markPending` only | Not an inconsistency: a chat line is adjudicated by nothing, a card is adjudicated by an engine. An optimistic play the server rejects is worse than 80 ms of latency |
+| **`socket.io-client` is its own chunk** | `vite.config.ts` | The welcome page, the login form and the invite landing page never open a socket. Entry chunk: **150 kB gzip**, inside 06 §8's 200 kB budget |
+| **The stylelint-guard timeout was raised, not the test weakened** | 30 s | Stylelint's first `lint()` loads its whole rule set (~2 s) and exceeded the 5 s default under parallel load. It was the intermittent frontend failure noted since S02; it is a startup cost, not a slow assertion |
 
 ## Decisions made while building Phase I (2026-09-13)
 

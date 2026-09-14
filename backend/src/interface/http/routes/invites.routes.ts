@@ -1,6 +1,7 @@
 import { Router, type Request } from 'express'
 import type { Container } from '../../../container.js'
 import { InviteCodeParamsSchema, type InviteCodeParams } from '../../../contracts/dto/invites.js'
+import { asUser, requireUser } from '../middleware/authorize.js'
 import { asyncHandler } from '../middleware/error.js'
 import { rateLimit } from '../middleware/rateLimit.js'
 import { validParams, zodValidate } from '../middleware/validate.js'
@@ -47,6 +48,29 @@ export function buildInvitesRouter(container: Container): Router {
     asyncHandler(async (req, res) => {
       const { code } = validParams<InviteCodeParams>(req)
       res.json(await invites.resolve(code, contextOf(req)))
+    }),
+  )
+
+  /**
+   * ★ The one authenticated route in this file — S43, access level **U**.
+   *
+   * It exists because `resolve` withholds `tableId` from everyone, which is
+   * correct for the pre-join screen and leaves a signed-in user unable to reach
+   * the table a friend invited them to. A guest gets their destination from
+   * `POST /auth/guest`; this is the same answer for somebody who already has an
+   * account.
+   *
+   * Same rate-limit bucket as the resolve, deliberately: an attacker with an
+   * account must not get a second, fresh budget for guessing codes.
+   */
+  router.post(
+    '/invites/:code/redeem',
+    resolveLimit,
+    requireUser(),
+    zodValidate({ params: InviteCodeParamsSchema }),
+    asyncHandler(async (req, res) => {
+      const { code } = validParams<InviteCodeParams>(req)
+      res.json(await invites.redeemForUser(code, asUser(req).userId, contextOf(req)))
     }),
   )
 

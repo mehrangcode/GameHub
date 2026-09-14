@@ -108,6 +108,18 @@
       "value": "",
       "type": "string",
       "description": "Set by folder 07 — alongside claimMemberId, the other value the claim must leave alone."
+    },
+    {
+      "key": "redeemTableId",
+      "value": "",
+      "type": "string",
+      "description": "Set by folder 09 — a table minted for the invite-redeem checks, so the folder does not depend on the link folder 04 deliberately revokes."
+    },
+    {
+      "key": "redeemCode",
+      "value": "",
+      "type": "string",
+      "description": "Set by folder 09 — a fresh `maxUses: 2` invite, used to prove that redeeming consumes no use."
     }
   ],
   "item": [
@@ -2738,7 +2750,399 @@
       ]
     },
     {
-      "name": "09 The boundary (S12)",
+      "name": "09 Preferences & invite redeem (S40 + S43)",
+      "description": "The two routes Phase J needed that did not exist.\n\n`/me/preferences` is **U**, not G: a guest has no row, their choices live in localStorage and arrive with them at signup (03 §6.1 step 3).\n\n`/invites/:code/redeem` is the authenticated counterpart to the public resolve. The public payload withholds `tableId` on purpose, which left a signed-in user with nowhere to go short of becoming a guest — stranding their coins in a provisional wallet.",
+      "item": [
+        {
+          "name": "GET /me/preferences — defaults for a fresh account",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api}}/me/preferences",
+            "description": "Level **U**. Registration seeds the row, so this answers with the column defaults. A user with no row at all still gets defaults rather than a 404."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 with the documented defaults', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(body.theme).to.eql('system');",
+                  "  pm.expect(body.numeralSystem).to.eql('auto');",
+                  "  pm.expect(body.soundVolume).to.eql(70);",
+                  "});",
+                  "pm.test('★ `extra` is NOT published — it is migration headroom, not a settings bag', () => {",
+                  "  pm.expect(body).to.not.have.property('extra');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /me/preferences — a partial patch",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api}}/me/preferences",
+            "description": "One setting at a time, because that is how the customization page saves (debounced at 800 ms). A whole-object PUT is how two open tabs overwrite each other.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"theme\": \"dark\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 and the field changed', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(body.theme).to.eql('dark');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "★ PUT /me/preferences — a second patch leaves the first alone",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api}}/me/preferences",
+            "description": "The property the partial patch exists for. If `theme` comes back 'system' here, the route is replacing rather than merging.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"numeralSystem\": \"persian\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('★ the earlier choice survived', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(body.numeralSystem).to.eql('persian');",
+                  "  pm.expect(body.theme).to.eql('dark');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /me/preferences — an unknown key is REJECTED, not ignored",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api}}/me/preferences",
+            "description": "P7. A typo'd field name is a 400 during development rather than a setting that silently never saved.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"theme\": \"dark\", \"isAdmin\": true}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('400 naming the offending key', () => {",
+                  "  pm.response.to.have.status(400);",
+                  "  pm.expect(body.code).to.eql('VALIDATION_FAILED');",
+                  "  pm.expect(body.fieldErrors.isAdmin).to.eql(['errors.field.unknownKey']);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /me/preferences — an empty patch is refused",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api}}/me/preferences",
+            "description": "\"Change nothing\" reported as success would hide a client sending the wrong field name.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 VALIDATION_FAILED', () => {",
+                  "  pm.response.to.have.status(400);",
+                  "  pm.expect(pm.response.json().code).to.eql('VALIDATION_FAILED');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /me/preferences — a volume above 100 is refused, never clamped",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api}}/me/preferences",
+            "description": "Silent coercion is the thing the whole boundary exists to prevent (P7).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"soundVolume\": 250}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400, and the field is named', () => {",
+                  "  pm.response.to.have.status(400);",
+                  "  pm.expect(pm.response.json().fieldErrors.soundVolume).to.eql(['errors.field.tooBig']);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "setup — a fresh table for the redeem",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api}}/tables",
+            "description": "Folder 04 revokes `{{inviteCode}}` as part of its own assertions, so this folder mints its own link rather than depending on another folder's leftovers.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"gameSlug\": \"fixture\", \"seatCount\": 4, \"options\": {}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 — table created', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  pm.collectionVariables.set('redeemTableId', pm.response.json().id);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "setup — a fresh invite, maxUses 2",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api}}/tables/{{redeemTableId}}/invites",
+            "description": "`maxUses: 2` on purpose: the next two requests prove redeeming does not eat them.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"maxUses\": 2}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 — invite minted', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  pm.collectionVariables.set('redeemCode', pm.response.json().code);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "★ POST /invites/{{redeemCode}}/redeem — a signed-in user reaches the table",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api}}/invites/{{redeemCode}}/redeem",
+            "description": "The authenticated counterpart to `GET /invites/:code`. Returns the `tableId` the public payload withholds, plus a server-decided `redirectTo`. Consumes **no** invite use — `maxUses` counts guest identities minted against the link, and this mints none."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200 with a tableId and a redirectTo', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(body.tableId).to.be.a('string');",
+                  "  pm.expect(body.redirectTo).to.eql('/table/' + body.tableId);",
+                  "});",
+                  "pm.test('alreadyMember is information only — membership comes from the socket', () => {",
+                  "  pm.expect(body.alreadyMember).to.be.a('boolean');",
+                  "});",
+                  "pm.collectionVariables.set('redeemedTableId', body.tableId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "★★ POST /invites/{{redeemCode}}/redeem — a second call burns NO use",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api}}/invites/{{redeemCode}}/redeem",
+            "description": "The property this route was corrected for. Consuming a use here would mean a signed-in user who refreshes the invite page twice burns two uses of a `maxUses: 2` link and locks out the friend it was minted for."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('★★ 200, same table, and the link is untouched', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(body.tableId).to.eql(pm.collectionVariables.get('redeemedTableId'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "★★ GET /tables/{{redeemTableId}}/invites — useCount is still 0",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api}}/tables/{{redeemTableId}}/invites",
+            "description": "The assertion the route was corrected for: two redeems, zero uses consumed."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const invite = pm.response.json().find(i => i.code === pm.collectionVariables.get('redeemCode'));",
+                  "pm.test('★★ two redeems consumed NO use', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(invite.useCount).to.eql(0);",
+                  "  pm.expect(invite.maxUses).to.eql(2);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /invites/NOPE12345/redeem — a bad code answers as the public resolve does",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api}}/invites/NOPE12345/redeem",
+            "description": "Same 410, same body. An account must not be a cheaper way to enumerate live codes than anonymity (07 §5.2)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('410 INVITE_EXPIRED, and nothing else leaks', () => {",
+                  "  pm.response.to.have.status(410);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.code).to.eql('INVITE_EXPIRED');",
+                  "  pm.expect(body).to.not.have.property('tableId');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "10 The boundary (S12)",
       "description": "`POST /_probe` exists for exactly this: one deliberately picky schema that makes each boundary guarantee visible to a client. Dev-only.",
       "item": [
         {
@@ -3016,7 +3420,7 @@
       ]
     },
     {
-      "name": "10 Teardown",
+      "name": "11 Teardown",
       "description": "Closes the table and ends the session. Run last — everything above needs both.",
       "item": [
         {

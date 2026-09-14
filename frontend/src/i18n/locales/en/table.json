@@ -1,0 +1,93 @@
+{
+  "seat": {
+    "empty": "Empty seat",
+    "sitHere": "Sit here",
+    "number": "Seat {{seat}}",
+    "you": "You",
+    "bot": "Bot",
+    "spectator": "Spectator",
+    "host": "Host",
+    "team": "Team {{team}}",
+    "leave": "Leave seat",
+    "kick": "Remove",
+    "addBot": "Add a bot",
+    "removeBot": "Remove bot"
+  },
+  "status": {
+    "waiting": "Waiting for players",
+    "inProgress": "In progress",
+    "finished": "Finished",
+    "closed": "Closed"
+  },
+  "toolbar": {
+    "start": "Start the game",
+    "invite": "Invite",
+    "options": "Options",
+    "close": "Close table",
+    "spectators": "{{count}} watching"
+  },
+  "chat": {
+    "title": "Chat",
+    "placeholder": "Say something…",
+    "send": "Send",
+    "empty": "No messages yet."
+  },
+  "turn": {
+    "yours": "your turn",
+    "theirs": "{{name}} is thinking",
+    "label": "Turn deadline",
+    "strikes": "{{count}} of {{limit}} strikes",
+    "syncing": "Catching up…"
+  },
+  "warning": {
+    "title": "Play now or lose the seat",
+    "body": "You have {{seconds}} seconds. If you are removed you will earn nothing from this match."
+  },
+  "ejected": {
+    "title": "You were removed from your seat",
+    "bodyTimeout": "You were inactive for too long, so a bot is playing your seat.",
+    "bodyAbandon": "You were disconnected for too long, so a bot is playing your seat.",
+    "bodyKicked": "The host removed you from this table.",
+    "noReward": "You will earn no coins from this match.",
+    "reclaim": "Reclaim my seat",
+    "reclaimIn": "Reclaim my seat ({{time}})",
+    "reclaimGone": "This seat can no longer be reclaimed.",
+    "reclaimPending": "You will be back in at the end of this hand.",
+    "returned": "You are back in your seat. This match now pays half."
+  },
+  "reward": {
+    "title": "Your reward",
+    "awarded": "{{count}} coins",
+    "zero": "No coins from this match",
+    "base": "{{game}} base",
+    "placement": "Placement",
+    "premium": "Premium",
+    "integrity": "Integrity",
+    "repeatDecay": "Repeat matchup",
+    "duration": "Match length",
+    "earnedBeforeCaps": "Earned before limits",
+    "capped": "An earning limit reduced this.",
+    "readRule": "Read the rule"
+  },
+  "system": {
+    "memberJoined": "{{name}} joined",
+    "memberLeft": "{{name}} left",
+    "seatTaken": "{{name}} took seat {{seat}}",
+    "seatReleased": "{{name}} left seat {{seat}}",
+    "botAdded": "A bot took seat {{seat}}",
+    "botRemoved": "The bot left seat {{seat}}",
+    "playerKicked": "{{name}} was removed from the table",
+    "optionsChanged": "The host changed the table options",
+    "playerDisconnected": "{{name}} lost connection",
+    "playerReconnected": "{{name}} is back",
+    "gameStarted": "The game started",
+    "gameFinished": "The game finished",
+    "playerEjected": "{{name}} was removed for inactivity",
+    "playerReturned": "{{name}} reclaimed their seat"
+  },
+  "sync": {
+    "banner": "Reconnecting to the table…",
+    "outOfDate": "This page is out of date. Please refresh to keep playing.",
+    "refresh": "Refresh"
+  }
+}

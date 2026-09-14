@@ -42,6 +42,13 @@ export const COUNTERS = [
   'invites_minted',
   'invites_revoked',
   'invites_resolved',
+  /**
+   * S43 — a signed-in user reaching a table through an invite link. Against
+   * `guest_sessions_created` it is the read on how many invited friends already
+   * had accounts, which is what says whether the guest path is still earning
+   * its complexity.
+   */
+  'invites_redeemed',
   'invite_resolve_failures',
   'invite_resolve_rate_limited',
 

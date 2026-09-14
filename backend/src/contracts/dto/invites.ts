@@ -82,3 +82,31 @@ export const PublicInviteResponseSchema = z.object({
 })
 
 export type PublicInviteResponse = z.infer<typeof PublicInviteResponseSchema>
+
+/**
+ * ★ The **authenticated** counterpart to {@link PublicInviteResponseSchema} —
+ * S43.
+ *
+ * A guest who opens an invite link gets their table from `POST /auth/guest`,
+ * which returns a `redirectTo`. A signed-in user had no equivalent: the public
+ * payload deliberately withholds `tableId` (a leaked code must not also leak
+ * the table's identifier), so the only way for them to reach the table was to
+ * become a guest — which would be absurd for somebody who already has an
+ * account, and would strand their coins in a provisional wallet.
+ *
+ * `redirectTo` is the server's, for the same reason it is on the guest and
+ * claim responses: the destination is decided by the request that resolved the
+ * invite, never reconstructed by a client that could drift to a stale table.
+ */
+export const RedeemInviteResponseSchema = z.object({
+  tableId: z.string(),
+  redirectTo: z.string(),
+  /**
+   * True when the caller is already at this table, so the client can say
+   * "rejoin" rather than "join". Informational only — nothing is gated on it,
+   * and this route consumes no invite use either way.
+   */
+  alreadyMember: z.boolean(),
+})
+
+export type RedeemInviteResponse = z.infer<typeof RedeemInviteResponseSchema>

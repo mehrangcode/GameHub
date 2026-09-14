@@ -131,12 +131,12 @@ in particular the one that needs doing by hand: corrupt a balance and watch the 
 
 ### Phase J — Frontend
 
-- [ ] S39 Axios instance, single-flight refresh, `authStore`, login/register
-- [ ] S40 `tokens.css`, `themeStore`, i18n en+fa, `dir` switching
-- [ ] S41 Welcome page — registry-driven preview cards
-- [ ] S42 `socketStore` + socket manager + `seq` gap detection
-- [ ] S43 ⭐ Invite landing → guest join
-- [ ] S44 `TableShell` — seats, presence, chat, countdown ring, nudge
+- [x] S39 Axios instance, single-flight refresh, `authStore`, login/register
+- [x] S40 `tokens.css`, `themeStore`, i18n en+fa, `dir` switching
+- [x] S41 Welcome page — registry-driven preview cards
+- [x] S42 `socketStore` + socket manager + `seq` gap detection
+- [x] S43 ⭐ Invite landing → guest join
+- [x] S44 `TableShell` — seats, presence, chat, countdown ring, nudge
 
 ### Phase K — Ship
 

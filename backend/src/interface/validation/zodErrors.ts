@@ -1,4 +1,9 @@
 import type { ZodError } from 'zod'
+import {
+  I18N_KEY_PREFIX,
+  ZOD_FALLBACK_KEY,
+  ZOD_ISSUE_KEYS,
+} from '../../contracts/validation.js'
 
 /**
  * Zod issue → `fieldErrors`, shared by the REST boundary and the socket
@@ -16,28 +21,21 @@ import type { ZodError } from 'zod'
  * the whole `code` + `i18nKey` contract exists to prevent. Zod's own wording is
  * genuinely useful and stays in the logged message.
  */
-export const ISSUE_KEYS: Record<string, string> = {
-  invalid_type: 'errors.field.invalidType',
-  invalid_literal: 'errors.field.invalidValue',
-  invalid_enum_value: 'errors.field.invalidOption',
-  invalid_union: 'errors.field.invalidValue',
-  invalid_union_discriminator: 'errors.field.invalidOption',
-  invalid_string: 'errors.field.invalidFormat',
-  invalid_date: 'errors.field.invalidDate',
-  too_small: 'errors.field.tooSmall',
-  too_big: 'errors.field.tooBig',
-  not_multiple_of: 'errors.field.invalidValue',
-  unrecognized_keys: 'errors.field.unknownKey',
-  custom: 'errors.field.invalid',
-}
+/**
+ * The table moved to `contracts/validation.ts` at S39, so the browser's login
+ * and register forms — which validate with the *same schemas* — render the
+ * *same* message the server would for the same input. Re-exported here because
+ * this is where every existing caller looks for it.
+ */
+export const ISSUE_KEYS = ZOD_ISSUE_KEYS
 
 /**
  * A schema's own message wins when it already *is* a key — that is how
  * `errors.passwordTooShort` reaches the form instead of a generic "too small".
  */
 export function i18nKeyFor(issue: ZodError['issues'][number]): string {
-  if (issue.message.startsWith('errors.')) return issue.message
-  return ISSUE_KEYS[issue.code] ?? 'errors.field.invalid'
+  if (issue.message.startsWith(I18N_KEY_PREFIX)) return issue.message
+  return ZOD_ISSUE_KEYS[issue.code] ?? ZOD_FALLBACK_KEY
 }
 
 export interface CollectOptions {
