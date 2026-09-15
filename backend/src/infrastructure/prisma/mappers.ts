@@ -25,7 +25,19 @@ import type {
   UserStatus,
   WalletStatus,
 } from '../../contracts/enums.js'
+import type {
+  AdminAction,
+  AdminTargetType,
+  GameFlagState,
+} from '../../contracts/admin/enums.js'
 import type { TurnEnforcement } from '../../contracts/dto/turnEnforcement.js'
+import type {
+  AdminAuditEntry,
+  AdminCredential,
+  AdminSession,
+  GameFlag,
+  PlatformFlag,
+} from '../../domain/entities/admin.js'
 import type {
   PlacementTable,
   RewardRule,
@@ -122,6 +134,37 @@ export function toUserPreferences(row: Rows.UserPreferences): UserPreferences {
 export function toPlayerStats(row: Rows.PlayerStats): PlayerStats {
   const { extraJson, ...rest } = row
   return { ...rest, extra: parseJsonOrNull<Record<string, unknown>>(extraJson) }
+}
+
+// ── 12-admin-console.md §4 (S48–S50) ──────────────────────────────────────
+
+export function toAdminCredential(row: Rows.AdminCredential): AdminCredential {
+  const { recoveryCodeHashes, ...rest } = row
+  return { ...rest, recoveryCodeHashes: parseJson<string[]>(recoveryCodeHashes) }
+}
+
+export function toAdminSession(row: Rows.AdminSession): AdminSession {
+  return row
+}
+
+export function toAdminAuditEntry(row: Rows.AdminAuditLog): AdminAuditEntry {
+  const { beforeJson, afterJson, ...rest } = row
+  return {
+    ...rest,
+    action: row.action as AdminAction,
+    targetType: row.targetType as AdminTargetType,
+    before: parseJsonOrNull<unknown>(beforeJson),
+    after: parseJsonOrNull<unknown>(afterJson),
+  }
+}
+
+export function toGameFlag(row: Rows.GameFlag): GameFlag {
+  return { ...row, state: row.state as GameFlagState }
+}
+
+export function toPlatformFlag(row: Rows.PlatformFlag): PlatformFlag {
+  const { value, ...rest } = row
+  return { ...rest, value: parseJson<unknown>(value) }
 }
 
 export function toSecurityEvent(row: Rows.SecurityEvent): SecurityEvent {

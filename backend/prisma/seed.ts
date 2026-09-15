@@ -16,6 +16,7 @@
  */
 import { PrismaClient } from '@prisma/client'
 import { getEnv } from '../src/config/env.js'
+import { buildGameRegistry } from '../src/domain/games/registry.js'
 import { hashPassword } from '../src/infrastructure/auth/password.js'
 
 const db = new PrismaClient()
@@ -521,6 +522,71 @@ async function seedAdmin(): Promise<void> {
     idempotencyKey: 'seed:admin:grant',
     reason: 'seed: development balance',
   })
+
+  /**
+   * ★ 12 §4.1 — the credential row exists, and it is empty.
+   *
+   * `totpEnrolledAt: null` is what makes enrollment mandatory: `AdminAuthService`
+   * treats a null here as "not enrolled" no matter what else the row says, and
+   * the only route an unenrolled admin can reach is `POST /auth/totp/enroll`.
+   *
+   * **The seed never writes a TOTP secret**, so `totpSecretEnc` is the empty
+   * string — a placeholder for a non-nullable column, not a key. Nothing ever
+   * decrypts it: `totpEnrolledAt` is checked first, and `decryptTotpSecret`
+   * refuses an empty input outright. A seed that generated a secret would mean
+   * every deployment of this codebase shipped with the same second factor,
+   * which is worse than having none.
+   */
+  await db.adminCredential.upsert({
+    where: { userId: ADMIN_ID },
+    create: { userId: ADMIN_ID, totpSecretEnc: '' },
+    // Never reset an operator's enrolled factor on a re-seed — same discipline
+    // as not rewriting the password hash above.
+    update: {},
+  })
+}
+
+/**
+ * 12 §4.1 — a `GameFlag` per game in the catalog, all `ENABLED`.
+ *
+ * The rows exist from day one so that "turn this game off" is an UPDATE rather
+ * than an INSERT the operator has to get right at the moment something is on
+ * fire. A slug with no row reads as `ENABLED` anyway, which is the correct
+ * default for a game that has only just been added to the registry.
+ *
+ * `registry.list()` is the public catalog, so the dev-only `fixture` game gets
+ * no flag — it is a test harness, not a product, and an operator being offered
+ * a switch for it would be a bug report.
+ */
+async function seedGameFlags(): Promise<void> {
+  const registry = buildGameRegistry()
+
+  for (const meta of registry.list()) {
+    await db.gameFlag.upsert({
+      where: { slug: meta.slug },
+      create: { slug: meta.slug, state: 'ENABLED' },
+      // Deliberately empty: re-seeding must not silently re-enable a game an
+      // operator turned off.
+      update: {},
+    })
+  }
+}
+
+/** 12 §7.3 — the two platform flags that exist in v1. Values are JSON (rule 3). */
+async function seedPlatformFlags(): Promise<void> {
+  const flags: ReadonlyArray<{ key: string; value: string }> = [
+    { key: 'maintenance', value: JSON.stringify({ on: false }) },
+    { key: 'registrationOpen', value: JSON.stringify(true) },
+  ]
+
+  for (const flag of flags) {
+    await db.platformFlag.upsert({
+      where: { key: flag.key },
+      create: flag,
+      // As above — a re-seed must not lift a maintenance mode somebody set.
+      update: {},
+    })
+  }
 }
 
 /**
@@ -761,6 +827,8 @@ async function main(): Promise<void> {
   await seedRewardRules()
   await seedAchievements()
   await seedAdmin()
+  await seedGameFlags()
+  await seedPlatformFlags()
 
   if (isProduction) {
     console.log('  catalog only — NODE_ENV=production seeds no demo data')

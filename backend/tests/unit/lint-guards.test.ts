@@ -2,10 +2,11 @@ import { ESLint } from 'eslint'
 import { beforeAll, describe, expect, it } from 'vitest'
 
 /**
- * S01's single most important outcome: the three architecture guards actually
- * reject a deliberate violation. Asserting the config merely *contains* the
- * rules would pass even if the `files` globs stopped matching — so each case
- * below lints real source text at a real path and expects a real error.
+ * S01's single most important outcome, extended by S48: the four architecture
+ * guards actually reject a deliberate violation. Asserting the config merely
+ * *contains* the rules would pass even if the `files` globs stopped matching —
+ * so each case below lints real source text at a real path and expects a real
+ * error.
  */
 describe('architecture lint guards', () => {
   let eslint: ESLint
@@ -132,6 +133,57 @@ describe('architecture lint guards', () => {
         'export const now = Date.now()\n',
       )
       expect(ruleIds(messages)).toContain('no-restricted-syntax')
+    })
+  })
+
+  describe('guard 4 — the admin console stays off the public port (12 §2.4, S48)', () => {
+    it('★ rejects app.ts importing an admin router', async () => {
+      // The realistic version of this mistake is not malice: it is someone
+      // adding "just the audit read endpoint" to the app they already have
+      // running, six months from now, with the console still unbuilt.
+      const messages = await lint(
+        'src/app.ts',
+        "import { buildAdminHealthRouter } from './interface/admin/routes/health.routes.js'\n" +
+          'export const x = buildAdminHealthRouter\n',
+      )
+      expect(ruleIds(messages)).toContain('no-restricted-imports')
+    })
+
+    it('★ rejects a public HTTP route importing admin middleware', async () => {
+      const messages = await lint(
+        'src/interface/http/routes/_probe.ts',
+        "import { requireStepUp } from '../../admin/middleware/requireStepUp.js'\n" +
+          'export const x = requireStepUp\n',
+      )
+      expect(ruleIds(messages)).toContain('no-restricted-imports')
+    })
+
+    it('★ rejects a socket handler importing the admin app', async () => {
+      const messages = await lint(
+        'src/interface/socket/handlers/_probe.ts',
+        "import { buildAdminApp } from '../../../admin-app.js'\nexport const x = buildAdminApp\n",
+      )
+      expect(ruleIds(messages)).toContain('no-restricted-imports')
+    })
+
+    it('★ but the ban is one-directional — admin may import the shared middleware', async () => {
+      // This is the assertion that stops guard 4 from being "fixed" into a
+      // symmetric ban. The two apps MUST agree on what an error, a request id
+      // and a validated body look like; duplicating that for the console gives
+      // it its own error taxonomy within a month.
+      const messages = await lint(
+        'src/interface/admin/routes/_probe.ts',
+        "import { asyncHandler } from '../../http/middleware/error.js'\nexport const x = asyncHandler\n",
+      )
+      expect(ruleIds(messages)).not.toContain('no-restricted-imports')
+    })
+
+    it('allows admin-main.ts to import the admin app — that is its whole job', async () => {
+      const messages = await lint(
+        'src/admin-main.ts',
+        "import { buildAdminApp } from './admin-app.js'\nexport const x = buildAdminApp\n",
+      )
+      expect(ruleIds(messages)).not.toContain('no-restricted-imports')
     })
   })
 })

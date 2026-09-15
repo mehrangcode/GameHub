@@ -1,18 +1,207 @@
 # Live Context — read this first, every session
 
-**Last updated:** 2026-09-14
+**Last updated:** 2026-09-15
 
 ## Where we are
 
 | | |
 |---|---|
 | **Milestone** | M0 — Platform Skeleton |
-| **Last session completed** | **S01–S44 (Phases A–J) built and green — Phase J not yet verified by Mehrang** |
-| **Next session** | **S45 — Dockerfiles, dev compose, CI** (3 h, 🖥️) — starts Phase K, ship |
+| **Last session completed** | **S01–S44 (Phases A–J) + S48–S50 (Phase L) built and green — Phases J and L not yet verified by Mehrang** |
+| **Next session** | **S45 — Dockerfiles, dev compose, CI** (3 h, 🖥️) — Phase K, the one phase now skipped |
 | **Blocked on** | Nothing in code. The two older environment items only (port 3000, Playwright deps) |
-| **Repo state** | `backend/` and `frontend/` exist. **1707 backend tests**, **154 frontend tests**. No `admin-frontend/` (MA) |
+| **Repo state** | `backend/` and `frontend/` exist. **1987 backend tests**, **154 frontend tests**. No `admin-frontend/` (MA) |
 
 Session spec for S45: `Documents/11-build-plan.md` §12.
+
+### ⚠ Phase K was skipped, on purpose — and it owes Phase L two things
+
+Mehrang chose on **2026-09-15** to build **Phase L (S48–S50, the admin spine)
+before Phase K (S45–S47, ship)**, because Phase K's output is deployment and he
+did not want it yet.
+
+That reordering is safe: `Needs: S46` on S48 is about *deployment* ordering, not
+code. Nothing in Phase L imports, reads or assumes anything Phase K produces.
+But S48 and S50 each specify one **Phase K artifact**, and both were deferred:
+
+| Owed by | What | Where it must land | Why it was safe to defer |
+|---|---|---|---|
+| **S45** | An `admin-api` service in `docker-compose.yml` with **no `ports:` entry** | S45's compose file | The isolation it expresses is already enforced three other ways — ESLint guard 4, the mount-time guard in `app.ts`, and `tests/integration/admin/isolation.test.ts`. Compose adds *network* isolation on top; it does not create it |
+| **S46** | The same in `docker-compose.prod.yml`, plus `REVOKE UPDATE, DELETE ON "AdminAuditLog"` in the Postgres migration | S46's `prisma/migrations/` | The app-level guarantee is stronger and already in place: `IAdminAuditRepository` declares no `update` and no `delete`, asserted structurally in the contract suite. The `REVOKE` defends against a *different* actor — somebody with the app's database credentials and a psql prompt |
+
+**When S45 and S46 run, both rows above are part of their scope.** S46's
+"Done when" should gain: *`docker compose config` shows `admin-api` with no
+published port, and `psql -c "DELETE FROM \"AdminAuditLog\""` as the app role is
+refused.*
+
+## Phase L — what to verify (the gate for S48–S50)
+
+```bash
+cd backend
+npm run typecheck && npm run lint && npm test        # 1987 tests, 74 files
+```
+
+**The names to read, in order of what they protect:**
+
+| Test | What breaks without it |
+|---|---|
+| `★ GET :3000/admin/api/v1/users → 404, not 401` | The console answers on the public port. 404 vs 401 is the whole distinction: a 401 confirms the route exists and is merely guarded, which is a map of the admin surface handed to anyone who asks |
+| `★ rejects app.ts importing an admin router` / `★ throws when an admin router is mounted` | The two halves of the same rule. ESLint catches the import; the mount-time guard catches the route somebody wrote inline, which is the realistic mistake and the one ESLint cannot see |
+| `★ but the ban is one-directional` | Stops guard 4 being "fixed" into a symmetric ban. The two apps **must** share `error.ts` and `validate.ts`, or the console grows its own error taxonomy within a month |
+| `★★ TOTP against RFC 6238 Appendix B` | The implementation agrees with the RFC rather than with itself. A TOTP that passes its own suite and nothing else fails on the operator's phone, at the only moment it matters, with no way to tell whether the code, the clock or the app is wrong |
+| `★★ the SAME code is refused the second time` | A code stays valid for its whole 30-second window however often it is presented — so shoulder-surfing one, or pulling one out of a proxy log, buys a login. This is the entire value of the second factor |
+| `★★ the stored secret is ciphertext` | A database dump becomes a working second factor |
+| `★★ refuses the seed placeholder` | An admin who has never enrolled becomes verifiable against a secret nobody holds |
+| `★★ an unenrolled admin can reach NOTHING but the enrollment route` | Enrollment becomes advisory, and the seeded admin is a password-only account with full platform authority |
+| `★★ a session presented from a new IP is REVOKED, not merely refused` | Refusing without revoking lets an attacker who guessed wrong once try again from a better address |
+| `★ rotation renews the token and NEVER the absolute cap` | The 8-hour cap becomes a sliding window, and a tab left open is a session that never ends |
+| `★ five wrong codes lock the account` / `the lock holds against the correct code` | A lockout a valid code could lift only ever inconvenences the legitimate operator — the attacker does not have one |
+| `★★ $key produces exactly one AdminAuditLog row` | **The A3 criterion.** Manifest-driven: adding a mutating route adds a case automatically, so an endpoint that forgets `withAudit` fails on the commit that introduced it |
+| `★ a rollback leaves NO row` | The audit row is written outside the transaction, and the log claims things that never happened |
+| `★★ with a stale mfaAt … changes NO state` | Step-up becomes a confirmation dialog rather than a control |
+| `★★ disabling a player costs them NOTHING` | **Invariant A8.** An operator investigating a report fines the person they are investigating |
+| `★★ a row deleted directly in SQL is reported, at the right index` | The chain stops being checkable, and "has this log been edited" goes back to being a matter of trust |
+| `★ and an EDITED row is reported differently from a deleted one` | An investigator cannot tell whether history was **deleted** or **rewritten**, which are different incidents |
+| `★★ IAdminAuditRepository declares NO update and NO delete` | A4 becomes a convention. A method that *threw* would still be a method somebody makes work at 3am |
+
+```bash
+# S48 — the three isolation guards, each proven by a deliberate violation.
+npx vitest run tests/integration/admin/isolation.test.ts tests/unit/lint-guards.test.ts \
+  --reporter=verbose
+
+# S49 — the second factor, checked against the RFC's own published vectors.
+npx vitest run tests/unit/admin/totp.test.ts --reporter=verbose
+
+# S49 — the flows: enrollment, replay, lockout, the IP pin, step-up.
+npx vitest run tests/integration/admin/auth.test.ts --reporter=verbose
+
+# S50 — ⭐ the spine. Every case here iterates the route manifest.
+npx vitest run tests/integration/admin/spine.test.ts --reporter=verbose
+
+# And the two new repository sets, against the fakes AND SQLite (every name twice).
+npx vitest run tests/unit/repositories/contract/admin.test.ts --reporter=verbose
+```
+
+### Live — you need your phone for this one
+
+**`backend/requests/admin.http` is the manual** — every block below in full,
+with what each response proves. Read that rather than this summary if you are
+actually sitting down to do it.
+
+```bash
+# 1. The key the admin process refuses to boot without:
+openssl rand -base64 32          # → paste into backend/.env as ADMIN_TOTP_ENC_KEY
+
+# 2. Prove the refusal first. This must FAIL and name the variable:
+cd backend && ADMIN_TOTP_ENC_KEY= npm run dev:admin
+
+# 3. And prove guard 1 the way S01's lint proof works — this must FAIL:
+echo "import './interface/admin/routes/health.routes.js'" >> src/app.ts
+npx eslint src/app.ts ; git checkout src/app.ts
+
+# 4. Then two terminals:
+cd backend && PORT=3999 npm run dev
+cd backend && npm run dev:admin            # :3100
+
+curl -si localhost:3999/admin/api/v1/users | head -1   # → 404
+curl -si localhost:3100/health             | head -1   # → 200
+curl -si localhost:3100/admin/api/v1/users | head -1   # → 401
+```
+
+**★★ The three things worth doing by hand, in order:**
+
+1. **Enroll.** `POST /auth/login` → `enrollmentRequired: true`. Enroll, scan the
+   `otpauth://` URI into your phone, **save the recovery codes**, then
+   `POST /auth/mfa` with a live code. Then **send that exact same code again** —
+   it is refused. That refusal is `lastTotpStep`, and it is why a second factor
+   is worth having.
+2. **Disable somebody, and check their wallet.** Create a second account, give
+   it coins (`npx tsx scripts/dev-credit.ts`), disable it with a reason, then
+   open `npm run db:studio`. The balance is **unchanged** and there is **no new
+   `WalletTransaction` row of any kind**. That is A8 — forfeiture punishes
+   idling, not operations.
+3. **Break the audit log on purpose.**
+   ```bash
+   curl -sb /tmp/a.txt localhost:3100/admin/api/v1/audit/verify | jq   # → ok: true
+   sqlite3 prisma/dev.db "DELETE FROM AdminAuditLog WHERE id = \
+     (SELECT id FROM AdminAuditLog ORDER BY createdAt LIMIT 1 OFFSET 1)"
+   curl -sb /tmp/a.txt localhost:3100/admin/api/v1/audit/verify | jq   # → ok: false
+   ```
+   → `brokenAt: { index: 1, reason: 'PREV_HASH_MISMATCH' }`. Edit a row's
+   `reason` in place instead and the reason becomes `HASH_MISMATCH`. The two are
+   distinguished on purpose: one means history was **deleted**, the other that it
+   was **rewritten**.
+
+### Postman: there are now TWO collections, and one of them is not re-runnable
+
+```bash
+# The main one. One process, re-runnable for ever. 99 requests, 141 assertions.
+cd backend && PORT=3999 npm run dev
+npx newman run postman/Template.postman_collection.json \
+  -e postman/Template.local.postman_environment.json --env-var baseUrl=http://localhost:3999
+
+# The admin one. Needs BOTH processes, and a fresh database. 24 requests, 35 assertions.
+cd backend && npm run dev:admin
+npx newman run postman/Template.admin.postman_collection.json \
+  -e postman/Template.admin.local.postman_environment.json
+```
+
+Both were run against a live pair of servers on 2026-09-15: **0 failures** in
+each.
+
+**Why the split.** The admin flow needs a second process on `:3100`, and folding
+it into the main collection would turn every ordinary `newman` run red for
+anyone who only started `npm run dev`. So the main collection keeps a new folder
+— `12 Admin isolation (S48)`, five requests, all against `:3000` — asserting the
+404s, and the whole admin journey lives in its own file.
+
+**★ The admin collection is deliberately not re-runnable.** `POST
+/auth/totp/enroll` refuses a second call with `ALREADY_ENROLLED`, because a
+silent re-enrollment would invalidate the authenticator the operator is holding.
+There is no API that creates an admin, so the collection cannot mint itself a
+fresh one — it needs `npm run db:reset` first. That is the once-only property
+working, not a gap in the collection.
+
+**★ It logs itself in with a real TOTP code.** The pre-request script on
+`POST /auth/mfa` implements RFC 6238 over `CryptoJS` in the Postman sandbox — the
+same base32 → HMAC-SHA1 → dynamic-truncation the server runs. The request
+immediately after it re-sends **the same code** and expects a 401: the replay
+guard, asserted by the collection rather than only by the suite.
+
+### Decisions made while building Phase L (2026-09-15)
+
+| Decision | Value | Why |
+|---|---|---|
+| **TOTP is hand-written** | `infrastructure/admin/totp.ts`, ~200 lines over `node:crypto` | Eighty lines of HMAC and a truncation, specified to the bit by an RFC that ships test vectors — which the suite checks against. A dependency would be supply-chain surface in the authentication path bought with no reduction in what has to be understood |
+| **`withAudit` lives in `application/`, not `infrastructure/`** | `application/services/admin/withAudit.ts` | 12 §2.3 files it under `infrastructure/admin/auditUow.ts`, but it depends on nothing except `IUnitOfWork` and `Repositories` — both domain interfaces — and every caller is an application service, which ESLint guard 1 forbids from importing `infrastructure/**`. Following the document would have made the rule it enforces unenforceable |
+| **Guard 2 intercepts mounting; it does not walk the route table** | `forbidAdminRoutes(app)` wraps `app.use/get/post/…` | Express 5 keeps **no declared mount path** on a layer — only a closure over a compiled matcher — so a post-hoc stack walk cannot see that a router was mounted at `/admin`, and a guard that silently sees nothing is worse than no guard. Interception reads the path the developer typed and survives Express majors |
+| **`/auth/totp/enroll` takes a challenge, not a session** | The route is unauthenticated and gated by the password step | 12 §5 marks it `S`, but a fresh admin cannot hold a session — issuing one requires the factor they are there to create. The challenge is exactly what the password step already proved, and no other route accepts one |
+| **Login challenges are in memory** | A `Map` in `AdminAuthService`, swept on access | Worth 120 seconds, proving one thing, and their correct behaviour on restart is *to be gone*. Persisting them means a table and a cleanup job; Redis would put an authentication step into the one component 02 §3.2 says must hold only what is cheap to lose. **Revisit if a second admin-api replica ever exists** |
+| **The admin access token has its own audience** | `${JWT_AUDIENCE}-admin`, `kind: 'admin'`, and it names its `AdminSession` | A player token presented to `:3100` fails verification and vice versa — the cryptography says the two sessions are unrelated, rather than a comment saying it. And unlike a player token it is **not** stateless: every request re-reads the session, which is what buys the IP pin, idle expiry and instant revocation |
+| **`ControlCommand` rows are written; the consumer is deferred to M3** | `withAudit` writes the outbox row in the same transaction | 12 §11.1 places the outbox **and its consumer** at M3. Writing the row now makes the deferred half purely the sweep loop and its Redis subscription — not a second design decision taken later under different assumptions. **See the gap below** |
+| **`GET /audit/verify` is `ADMIN`, every other read is `SUPPORT`** | One line in the manifest | The person most likely to have tampered with the log is an operator. Not a real defence, but it costs nothing and puts the boundary in the right place from the start |
+
+### ⚠ The one thing S50 specifies that is NOT built
+
+`11-build-plan.md` S50 says disabling a seated player should *"release the seat,
+substitute a bot, and settle rewards for completed hands with no forfeiture"*.
+That needs the **`ControlCommand` consumer**, which `12-admin-console.md` §11.1
+explicitly schedules for **M3**. The two documents disagree, and §11.1 — the
+admin doc's own delivery split — was followed.
+
+**What is built:** the status change, every refresh family revoked, admin
+sessions revoked, the audit row, and the `user.disabled` outbox row, all in one
+transaction. **What is not:** the api process consuming that row to drop the
+socket and bot-fill the seat.
+
+**The practical gap is narrow.** `authenticate` re-reads `user.status` on every
+request *and every socket handshake*, so a disabled player cannot reconnect,
+cannot refresh, and cannot start anything new. What survives is an
+already-open socket finishing the current hand. That is "a live socket keeps
+playing", not "a banned player keeps access" — but it is a gap, and M3 closes
+it.
+
+## Phase J — what to verify (the gate for S39–S44)
 
 **All three of M0's headline exit criteria run, and the third one is now
 clickable** — the welcome page renders its cards from `GET /api/v1/games`.

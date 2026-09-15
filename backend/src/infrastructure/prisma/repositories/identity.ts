@@ -16,6 +16,7 @@ import type {
   NewRefreshToken,
   NewSecurityEvent,
   NewUser,
+  UserSearchFilter,
   SecurityEventFilter,
 } from '../../../domain/repositories/identity.js'
 import type { SecurityEventKind } from '../../../contracts/enums.js'
@@ -71,6 +72,45 @@ export class PrismaUserRepository extends PrismaRepositoryBase implements IUserR
       'User',
       id,
     )
+  }
+
+  async search(filter: UserSearchFilter, page: PageQuery = {}): Promise<User[]> {
+    if (page.before !== undefined && (await this.db.user.count({ where: { id: page.before } })) === 0) {
+      return []
+    }
+
+    const query = filter.query?.trim()
+    const rows = await this.db.user.findMany({
+      where: {
+        ...(filter.status === undefined ? {} : { status: filter.status }),
+        ...(filter.role === undefined ? {} : { role: filter.role }),
+        ...(filter.createdAfter === undefined && filter.createdBefore === undefined
+          ? {}
+          : {
+              createdAt: {
+                ...(filter.createdAfter === undefined ? {} : { gte: filter.createdAfter }),
+                ...(filter.createdBefore === undefined ? {} : { lte: filter.createdBefore }),
+              },
+            }),
+        ...(query === undefined || query === ''
+          ? {}
+          : {
+              OR: [
+                { id: query },
+                // Emails are stored already-normalised, so lower-casing the
+                // needle makes this behave identically on both providers. See
+                // `UserSearchFilter.query` for why `mode: 'insensitive'` is not
+                // an option.
+                { email: { contains: query.toLowerCase() } },
+                { displayName: { contains: query } },
+              ],
+            }),
+      },
+      orderBy: NEWEST_FIRST,
+      take: page.limit ?? 25,
+      ...cursorArgs(page.before),
+    })
+    return rows.map(toUser)
   }
 }
 

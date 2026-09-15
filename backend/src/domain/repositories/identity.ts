@@ -1,4 +1,4 @@
-import type { SecurityEventKind } from '../../contracts/enums.js'
+import type { SecurityEventKind, UserRole, UserStatus } from '../../contracts/enums.js'
 import type {
   GuestSession,
   RefreshToken,
@@ -44,6 +44,37 @@ export interface IUserRepository extends IRepository<User> {
    */
   findManyByIds(ids: readonly string[]): Promise<User[]>
   touchLastSeen(id: string, at: Date): Promise<void>
+
+  /**
+   * The admin console's user search — 12 §7.1, `GET /users` (S50).
+   *
+   * Cursor-paginated and newest-first, like every other list in the platform.
+   * Deliberately narrow: id, email, display name, status, role and a
+   * `createdAt` range. There is no free-text search across match history or
+   * chat here, because "find me everything about this person" is a capability
+   * that should be reached deliberately through the detail page, not
+   * accidentally through a search box.
+   */
+  search(filter: UserSearchFilter, page?: PageQuery): Promise<User[]>
+}
+
+export interface UserSearchFilter {
+  /**
+   * Matches an exact id, or a substring of the email or display name.
+   *
+   * ⚠ **Case sensitivity differs by provider.** SQLite's `LIKE` is
+   * case-insensitive for ASCII; Postgres's is not, and Prisma's
+   * `mode: 'insensitive'` is Postgres-only — using it would break the
+   * SQLite ∩ Postgres rule (02 §6.2). Emails are stored already-normalised so
+   * they are matched against a lower-cased query and behave identically on
+   * both; **display-name matching is case-sensitive on Postgres**. Worth
+   * knowing before an operator reports that "Sara" finds nothing.
+   */
+  readonly query?: string
+  readonly status?: UserStatus
+  readonly role?: UserRole
+  readonly createdAfter?: Date
+  readonly createdBefore?: Date
 }
 
 export type NewGuestSession = Draft<

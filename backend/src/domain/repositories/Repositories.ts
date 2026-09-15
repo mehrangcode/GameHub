@@ -1,4 +1,10 @@
 import type {
+  IAdminAuditRepository,
+  IAdminCredentialRepository,
+  IAdminSessionRepository,
+  IControlCommandRepository,
+} from './admin.js'
+import type {
   ICosmeticRepository,
   IRewardRuleRepository,
   ISubscriptionRepository,
@@ -54,6 +60,21 @@ export interface Repositories {
   /** Read-only until M7: premium's 1.5× earn multiplier, and nothing else. */
   readonly subscriptions: ISubscriptionRepository
   readonly cosmetics: ICosmeticRepository
+
+  /**
+   * 12 §4 — the admin side (S48–S50). In the *same* bundle as everything
+   * above, deliberately: `withAudit` appends an `AdminAuditLog` row inside the
+   * caller's transaction, and it can only do that if the audit repository and
+   * the wallet repository come from one `uow.run(...)` scope. A separate admin
+   * bundle would make "the audit row and the state change commit together"
+   * unenforceable, which is the whole of invariant A3.
+   */
+  readonly adminCredentials: IAdminCredentialRepository
+  readonly adminSessions: IAdminSessionRepository
+  /** ★ Append-only. No `update`, no `delete` — see the interface (A4). */
+  readonly adminAudit: IAdminAuditRepository
+  /** 12 §6.1 — the admin→gameplay outbox. Written here, consumed at M3. */
+  readonly controlCommands: IControlCommandRepository
 }
 
 /**

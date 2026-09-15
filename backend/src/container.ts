@@ -1,6 +1,10 @@
 import type { PrismaClient } from '@prisma/client'
 import type { Logger } from 'pino'
+import type { IAdminTokenIssuer, ITotpProvider } from './application/ports/admin.js'
 import { systemClock, type Clock } from './application/ports/clock.js'
+import { AdminAuthService } from './application/services/admin/AdminAuthService.js'
+import { AuditService } from './application/services/admin/AuditService.js'
+import { ModerationService } from './application/services/admin/ModerationService.js'
 import type { IRateLimiter } from './application/ports/rateLimiter.js'
 import { MutableRealtimePublisher } from './application/ports/realtime.js'
 import { MutableTurnObserver } from './application/ports/turns.js'
@@ -23,8 +27,9 @@ import { SettlementService } from './application/services/SettlementService.js'
 import { TableService } from './application/services/TableService.js'
 import { TurnTimerService } from './application/services/TurnTimerService.js'
 import { WalletService } from './application/services/WalletService.js'
-import type { Env } from './config/env.js'
+import type { AdminEnv, Env } from './config/env.js'
 import { getEnv } from './config/env.js'
+import { AdminTokenIssuer, Aes256TotpProvider } from './infrastructure/admin/adapters.js'
 import { buildGameRegistry, type GameRegistry } from './domain/games/registry.js'
 import type { IUnitOfWork, Repositories } from './domain/repositories/Repositories.js'
 import {
@@ -436,4 +441,70 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
       await Promise.all([redis?.close(), prisma.$disconnect()])
     },
   }
+}
+
+/**
+ * ★ The admin process's services — 12-admin-console.md §2.2.
+ *
+ * In **this** file rather than a parallel composition root, because the whole
+ * argument for two entrypoints over two backends was that the money rules must
+ * not fork. `buildAdminServices` takes the container the public API would have
+ * built and adds to it: the same `repos`, the same `uow`, the same
+ * `WalletService` further down the line. There is one ledger, and this function
+ * is where that is visible.
+ *
+ * The public process never calls it, which is why `AdminEnv` — and therefore
+ * `ADMIN_TOTP_ENC_KEY` — appears only here and in `admin-main.ts`. An API on
+ * the public internet has no business holding the key that decrypts every
+ * admin's second factor.
+ */
+export interface AdminServices {
+  readonly auth: AdminAuthService
+  /** S50 — reads the append-only log and walks its hash chain. No write path. */
+  readonly audit: AuditService
+  /** S50 — the one mutating capability, and the proof that the spine holds. */
+  readonly moderation: ModerationService
+  readonly totp: ITotpProvider
+  readonly tokens: IAdminTokenIssuer
+}
+
+export function buildAdminServices(container: Container, env: AdminEnv): AdminServices {
+  const totp = new Aes256TotpProvider(env.ADMIN_TOTP_ENC_KEY)
+  const tokens = new AdminTokenIssuer(env)
+
+  const auth = new AdminAuthService({
+    uow: container.uow,
+    repos: container.repos,
+    // The *same* argon2 configuration as the player side. An admin password
+    // verified more cheaply than a player's would be an odd thing to explain.
+    hasher: new Argon2PasswordHasher(env),
+    totp,
+    tokens,
+    policy: {
+      challengeTtlSec: env.ADMIN_CHALLENGE_TTL_SEC,
+      sessionAbsoluteHours: env.ADMIN_SESSION_ABSOLUTE_HOURS,
+      sessionIdleMin: env.ADMIN_SESSION_IDLE_MIN,
+      stepUpWindowMin: env.ADMIN_STEPUP_WINDOW_MIN,
+      mfaMaxAttempts: env.ADMIN_MFA_MAX_ATTEMPTS,
+      lockoutMin: env.ADMIN_LOCKOUT_MIN,
+      issuer: env.JWT_ISSUER,
+    },
+    security: container.security,
+    metrics: container.metrics,
+    logger: container.logger.child({ process: 'admin' }),
+  })
+
+  const audit = new AuditService(container.repos)
+
+  const moderation = new ModerationService({
+    // ★ `container.uow` — the same unit of work the settlement path uses. That
+    // is what lets `withAudit` put the audit row in the caller's transaction,
+    // and it is the concrete reason A3 is enforceable rather than aspirational.
+    uow: container.uow,
+    repos: container.repos,
+    metrics: container.metrics,
+    logger: container.logger.child({ process: 'admin' }),
+  })
+
+  return { auth, audit, moderation, totp, tokens }
 }

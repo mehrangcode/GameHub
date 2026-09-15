@@ -57,8 +57,15 @@ describe('schema portability', () => {
     expect(idLines.length).toBeGreaterThan(20)
     for (const line of idLines) {
       const isCuid = line.includes('@default(cuid())')
-      // Catalog models use hand-written stable slugs as their id, by design.
-      const isStableSlug = /^\s*(id|userId)\s+String\s+@id\s*$/.test(line)
+      /**
+       * Catalog and flag models use a hand-written stable key as their id, by
+       * design: `GameFlag.slug` must equal a `domain/games/registry.ts` slug
+       * and `PlatformFlag.key` a known flag name, so a generated cuid would be
+       * an id nobody could write down, plus a second unique column to look the
+       * row up by. The rule this still enforces is the portable one — a
+       * `String` id, never a database-generated integer or a native type.
+       */
+      const isStableSlug = /^\s*(id|userId|slug|key)\s+String\s+@id\s*$/.test(line)
       expect(isCuid || isStableSlug, `unexpected id declaration: ${line.trim()}`).toBe(true)
     }
   })

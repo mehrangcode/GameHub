@@ -1,5 +1,11 @@
 import type { IUnitOfWork, Repositories } from '../../src/domain/repositories/Repositories.js'
 import {
+  InMemoryAdminAuditRepository,
+  InMemoryAdminCredentialRepository,
+  InMemoryAdminSessionRepository,
+  InMemoryControlCommandRepository,
+} from './admin.js'
+import {
   InMemoryCosmeticRepository,
   InMemoryRewardRuleRepository,
   InMemorySubscriptionRepository,
@@ -28,6 +34,7 @@ import {
   InMemoryTableRepository,
 } from './tables.js'
 
+export * from './admin.js'
 export * from './economy.js'
 export * from './games.js'
 export * from './identity.js'
@@ -47,6 +54,10 @@ export interface InMemoryRepositories extends Repositories {
   readonly matchResults: InMemoryMatchResultRepository
   readonly participants: InMemoryMatchParticipantRepository
   readonly chat: InMemoryChatRepository
+  readonly adminCredentials: InMemoryAdminCredentialRepository
+  readonly adminSessions: InMemoryAdminSessionRepository
+  readonly adminAudit: InMemoryAdminAuditRepository
+  readonly controlCommands: InMemoryControlCommandRepository
 }
 
 /**
@@ -90,6 +101,10 @@ export function buildInMemoryRepositories(): InMemoryRepositories {
     rewardRules: new InMemoryRewardRuleRepository(),
     subscriptions: new InMemorySubscriptionRepository(),
     cosmetics: new InMemoryCosmeticRepository(),
+    adminCredentials: new InMemoryAdminCredentialRepository(),
+    adminSessions: new InMemoryAdminSessionRepository(),
+    adminAudit: new InMemoryAdminAuditRepository(),
+    controlCommands: new InMemoryControlCommandRepository(),
   }
 }
 

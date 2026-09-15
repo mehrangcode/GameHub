@@ -8,8 +8,10 @@
   },
   "scripts": {
     "dev": "tsx watch src/main.ts",
+    "dev:admin": "tsx watch src/admin-main.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
+    "start:admin": "node dist/admin-main.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",

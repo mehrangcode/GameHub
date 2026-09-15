@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { ERROR_CODES, type ErrorCode } from '../../src/contracts/errors.js'
 import { AppError, isAppError } from '../../src/domain/errors/AppError.js'
 import {
+  AdminLockedError,
+  MfaEnrollmentRequiredError,
+  MfaRequiredError,
+  ReasonRequiredError,
+  SelfTargetError,
+  StepUpRequiredError,
+} from '../../src/domain/errors/admin.js'
+import {
   CapRejectedError,
   EmailTakenError,
   ForbiddenError,
@@ -113,6 +121,43 @@ const TAXONOMY: ReadonlyArray<{
     httpStatus: 409,
     i18nKey: 'errors.seatNotReclaimable',
     build: () => new SeatNotReclaimableError(),
+  },
+  // ── 12-admin-console.md §5.1 (S48) ──────────────────────────────────────
+  {
+    code: 'STEP_UP_REQUIRED',
+    httpStatus: 401,
+    i18nKey: 'errors.admin.stepUpRequired',
+    build: () => new StepUpRequiredError(),
+  },
+  {
+    code: 'MFA_REQUIRED',
+    httpStatus: 401,
+    i18nKey: 'errors.admin.mfaRequired',
+    build: () => new MfaRequiredError(),
+  },
+  {
+    code: 'MFA_ENROLLMENT_REQUIRED',
+    httpStatus: 403,
+    i18nKey: 'errors.admin.mfaEnrollmentRequired',
+    build: () => new MfaEnrollmentRequiredError(),
+  },
+  {
+    code: 'ADMIN_LOCKED',
+    httpStatus: 423,
+    i18nKey: 'errors.admin.locked',
+    build: () => new AdminLockedError(new Date('2026-01-01T00:00:00.000Z')),
+  },
+  {
+    code: 'REASON_REQUIRED',
+    httpStatus: 400,
+    i18nKey: 'errors.admin.reasonRequired',
+    build: () => new ReasonRequiredError('user.disable'),
+  },
+  {
+    code: 'SELF_TARGET_FORBIDDEN',
+    httpStatus: 409,
+    i18nKey: 'errors.admin.selfTargetForbidden',
+    build: () => new SelfTargetError(),
   },
   {
     code: 'INTERNAL',

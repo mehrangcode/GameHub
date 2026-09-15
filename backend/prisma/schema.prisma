@@ -12,12 +12,12 @@
 //   6. Soft delete via a nullable *At column, never a `deleted` boolean.
 //   7. Balances are never mutated without an appended ledger row.
 //
-// Two append-only logs are the backbone: GameEvent and WalletTransaction.
-// Neither is ever updated or deleted.
+// Three append-only logs are the backbone: GameEvent, WalletTransaction and —
+// from S48 — AdminAuditLog. None is ever updated or deleted.
 //
 // The seven admin models (AdminCredential, AdminSession, AdminAuditLog,
-// GameFlag, PlatformFlag, ControlCommand, DailyMetric) arrive in S48 with the
-// admin entrypoint — 12-admin-console.md §4.
+// GameFlag, PlatformFlag, ControlCommand, DailyMetric) landed in S48 with the
+// admin entrypoint — 12-admin-console.md §4, at the bottom of this file.
 
 generator client {
   provider = "prisma-client-js"
@@ -82,6 +82,13 @@ model User {
   blocksMade     Block[]               @relation("Blocker")
   blocksAgainst  Block[]               @relation("Blocked")
   securityEvents SecurityEvent[]
+
+  // 12 §4 — the admin side of an identity. Present on at most a handful of
+  // rows: `adminCredential` exists only once TOTP is enrolled, and the two
+  // lists are empty for every player.
+  adminCredential AdminCredential?
+  adminSessions   AdminSession[]
+  adminActions    AdminAuditLog[]  @relation("AdminActor")
 
   @@index([lastSeenAt])
   @@index([status])
@@ -848,4 +855,128 @@ model UserAchievement {
 
   @@unique([userId, achievementId])
   @@index([achievementId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3.13 Admin — 12-admin-console.md §4 (S48)
+//
+// These seven models are read and written by the admin process (:3100) only,
+// but they live in this one schema for the reason §2.2 gives: a second database
+// would fork the ledger, and a forked ledger is how ledgers break.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Second-factor material and lockout state. One row per admin — 12 §3.3.
+model AdminCredential {
+  id                 String    @id @default(cuid())
+  userId             String    @unique
+  // AES-256-GCM as `iv:tag:ciphertext`, keyed by ADMIN_TOTP_ENC_KEY. Never a
+  // plaintext base32 secret: a database dump alone must not yield a working
+  // second factor, and `tests/unit/admin/totp.test.ts` asserts it.
+  totpSecretEnc      String
+  totpEnrolledAt     DateTime?
+  // The replay guard. Advanced on every success, so the same 6 digits cannot
+  // be spent twice — which closes the shoulder-surf and proxy-replay window.
+  lastTotpStep       Int?
+  // JSON array of sha256 hashes. A String, not String[] — rule 2.
+  recoveryCodeHashes String    @default("[]")
+  failedAttempts     Int       @default(0)
+  lockedUntil        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// Admin sessions live apart from player RefreshTokens — 12 §3.2.
+model AdminSession {
+  id         String    @id @default(cuid())
+  userId     String
+  tokenHash  String    @unique // sha256 of the refresh token
+  ip         String
+  userAgent  String
+  // Last successful TOTP. `requireStepUp` measures against this, so a valid
+  // session is still not sufficient for anything irreversible (12 §3.4).
+  mfaAt      DateTime
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  expiresAt  DateTime // absolute cap, regardless of activity
+  revokedAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+}
+
+/// ★ Append-only. No update path and no delete path anywhere, including for
+/// the operator — 12 §1 A4. `IAdminAuditRepository` declares neither method,
+/// and the Postgres migration REVOKEs both from the app role.
+model AdminAuditLog {
+  id             String   @id @default(cuid())
+  actorUserId    String
+  actorIp        String
+  actorUserAgent String
+  requestId      String
+  action         String // 'user.disable' | 'wallet.adjust' | 'game.setFlag' | …
+  targetType     String // 'user' | 'table' | 'game' | 'flag' | 'wallet'
+  targetId       String
+  // Nullable in the column, mandatory per-action in the service: a 📝 route
+  // without one is REASON_REQUIRED before anything is written (12 §5.1).
+  reason         String?
+  beforeJson     String? // JSON snapshot; never queried into (rule 3)
+  afterJson      String?
+  // Tamper-evident chain — 12 §9 T24. `hash = sha256(prevHash + canonical row)`,
+  // walked by `GET /audit/verify`. Null `prevHash` marks the genesis row.
+  prevHash       String?
+  hash           String
+  createdAt      DateTime @default(now())
+
+  actor User @relation("AdminActor", fields: [actorUserId], references: [id])
+
+  @@index([createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([targetType, targetId, createdAt])
+}
+
+/// Per-game availability, overriding the code registry without a deploy — 12 §7.3.
+model GameFlag {
+  slug            String   @id // matches domain/games/registry.ts
+  state           String   @default("ENABLED") // 'ENABLED' | 'HIDDEN' | 'DISABLED'
+  reason          String?
+  updatedAt       DateTime @updatedAt
+  updatedByUserId String?
+}
+
+/// Generic key/value flags: maintenance mode, feature toggles, limits.
+model PlatformFlag {
+  key             String   @id // 'maintenance' | 'registrationOpen' | …
+  value           String // JSON-encoded scalar or object
+  updatedAt       DateTime @updatedAt
+  updatedByUserId String?
+}
+
+/// Durable outbox for admin→gameplay commands. The row is the authority (A6);
+/// the Redis publish is only a notification that it exists — 12 §6.1.
+model ControlCommand {
+  id          String    @id @default(cuid())
+  kind        String // 'table.close' | 'user.forceLogout' | …
+  payloadJson String
+  auditLogId  String // which admin action produced it
+  createdAt   DateTime  @default(now())
+  consumedAt  DateTime?
+
+  @@index([consumedAt, createdAt])
+}
+
+/// Nightly rollups. Reports never aggregate the live OLTP tables during
+/// play — 12 §7.4.
+model DailyMetric {
+  id         String   @id @default(cuid())
+  day        String // 'YYYY-MM-DD' — a String, so there is no DateTime math
+  metric     String // 'dau' | 'coinsMinted' | 'matches' | …
+  dimension  String   @default("_all") // game slug, preset, or '_all'
+  value      Int
+  computedAt DateTime @default(now())
+
+  @@unique([day, metric, dimension])
+  @@index([metric, day])
 }

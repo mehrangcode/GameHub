@@ -7,8 +7,23 @@ import { PrismaClient } from '@prisma/client'
  */
 export const db = new PrismaClient({ log: ['warn', 'error'] })
 
-/** Deleted in FK order — children first. */
+/**
+ * Deleted in FK order — children first.
+ *
+ * The three admin tables lead because all three reference `User`, and
+ * `AdminAuditLog.actorUserId` has no `onDelete: Cascade` (by design: an audit
+ * row must not vanish because an account was removed). Without them here, every
+ * suite that creates an admin fails the *next* `resetDb` with a foreign-key
+ * violation, several files away from the cause.
+ */
 const tablesInDeletionOrder = [
+  'adminAuditLog',
+  'adminSession',
+  'adminCredential',
+  'controlCommand',
+  'dailyMetric',
+  'gameFlag',
+  'platformFlag',
   'userAchievement',
   'achievement',
   'purchase',

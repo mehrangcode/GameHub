@@ -45,6 +45,9 @@ export function buildApp(container: Container): Express {
   const { env } = container
 
   app.disable('x-powered-by')
+  // ★ Guard 2, installed before a single route exists — see below. Everything
+  // mounted from here on is checked as it is written.
+  forbidAdminRoutes(app)
   /**
    * Behind Caddy (S46) the peer address is the proxy, so `req.ip` has to come
    * from `X-Forwarded-For` — and *only* there. Trusting the header in dev would
@@ -127,4 +130,114 @@ export function buildApp(container: Container): Express {
   app.use(errorHandler(container.logger))
 
   return app
+}
+
+/** `/admin`, `/admin/…`, `…/admin` — but never `/administrators`. */
+const ADMIN_PATH = /(^|\/)admin(\/|$)/
+
+/** The mounting methods. `route` and `all` included: both take a path. */
+const MOUNTING_METHODS = [
+  'use',
+  'route',
+  'all',
+  'get',
+  'post',
+  'put',
+  'patch',
+  'delete',
+  'options',
+  'head',
+] as const
+
+/**
+ * ★ Guard 2 of three — 12-admin-console.md §2.4.
+ *
+ * Wraps the public app's mounting methods so that **registering** an admin path
+ * throws, at the moment it is written, with a stack trace pointing at the line.
+ * `buildApp` installs it before anything is mounted, so a mistake is a process
+ * that will not start rather than a production request that succeeds.
+ *
+ * The three guards defend against three different mistakes, which is why one is
+ * not enough:
+ *
+ *   1. **ESLint** stops `app.ts` *importing* `interface/admin/**`. It cannot
+ *      see a router built inline, or one re-exported through a barrel file.
+ *   2. **This** stops anything being mounted under `/admin` however it got
+ *      here — including an inline `app.get('/admin/…')` written in a hurry,
+ *      which is the realistic version of this mistake, and including a router
+ *      whose *own* routes name `/admin` while its mount prefix looks innocent.
+ *   3. **The integration test** proves the result from the outside, over HTTP,
+ *      and is the one that keeps passing when someone deletes the other two.
+ *
+ * **Why interception rather than reading the route table.** Express 5 keeps no
+ * declared mount path on a layer at all — only a closure over a compiled
+ * matcher — so a post-hoc stack walk cannot see that a router was mounted at
+ * `/admin`, and a guard that silently sees nothing is worse than no guard.
+ * Intercepting the call reads the path the developer actually typed, and does
+ * not depend on Express internals that change between majors.
+ *
+ * Its one blind spot is a router mounted at `/admin` *inside another router*,
+ * where the prefix is again invisible. That is what guard 3 is for, and why it
+ * is an HTTP test rather than a second reading of the same internals.
+ *
+ * Exported so `tests/integration/admin/isolation.test.ts` exercises **this
+ * function** rather than a copy of it. A guard whose test re-implements the
+ * predicate proves only that the test agrees with itself.
+ */
+export function forbidAdminRoutes(app: Express): void {
+  for (const method of MOUNTING_METHODS) {
+    const original = app[method] as (...args: unknown[]) => unknown
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(app as any)[method] = function guarded(this: unknown, ...args: unknown[]) {
+      const offenders = [...new Set(args.flatMap((arg) => adminPathsIn(arg)))]
+      if (offenders.length > 0) {
+        throw new Error(
+          `the public app tried to mount ${offenders.length} admin path(s) via ` +
+            `app.${method}(): ${offenders.join(', ')}. interface/admin/** belongs to ` +
+            `admin-main.ts on ADMIN_PORT and nowhere else (12-admin-console.md §2.4). ` +
+            `If you are adding a role check to a route on the public port, you are ` +
+            `building the bug these guards exist to prevent — the route belongs in ` +
+            `interface/admin/ instead.`,
+        )
+      }
+      return original.apply(this, args)
+    }
+  }
+}
+
+/**
+ * Every `/admin` path reachable through one mounting argument: the path string
+ * itself, and — when the argument is a router or a sub-app — the paths its own
+ * layers declare.
+ *
+ * `app.get('some setting')` also lands here, since Express overloads it as a
+ * settings getter. Harmless: a setting name would have to be literally `admin`
+ * to trip, and if one ever were, that is a name worth changing.
+ */
+function adminPathsIn(value: unknown, depth = 0): string[] {
+  if (typeof value === 'string') return ADMIN_PATH.test(value) ? [value] : []
+  if (Array.isArray(value)) return value.flatMap((item) => adminPathsIn(item, depth))
+  if (value === null || (typeof value !== 'object' && typeof value !== 'function')) return []
+  if (depth > 8) return []
+
+  const candidate = value as {
+    stack?: unknown[]
+    router?: { stack?: unknown[] }
+    route?: { path?: string | string[] }
+    handle?: unknown
+  }
+
+  const own =
+    candidate.route?.path === undefined
+      ? []
+      : [candidate.route.path].flat().filter((path) => ADMIN_PATH.test(path))
+
+  const layers = candidate.stack ?? candidate.router?.stack ?? []
+  const nested = Array.isArray(layers)
+    ? layers.flatMap((layer) => adminPathsIn(layer, depth + 1))
+    : []
+  const handler = candidate.handle === undefined ? [] : adminPathsIn(candidate.handle, depth + 1)
+
+  return [...own, ...nested, ...handler]
 }

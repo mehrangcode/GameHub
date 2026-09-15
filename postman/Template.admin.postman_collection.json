@@ -1,0 +1,903 @@
+{
+  "info": {
+    "name": "Template — Admin (S48–S50)",
+    "description": "The admin spine on :3100 — 12-admin-console.md §3, §5.\n\n## Before you run it\n\n1. `openssl rand -base64 32` → `ADMIN_TOTP_ENC_KEY` in `backend/.env`. The admin process refuses to boot without it, on purpose.\n2. `cd backend && npm run db:reset` — **required**, see below.\n3. `cd backend && npm run dev:admin`\n\n## ★ Why this needs a fresh database every time\n\nEnrollment is deliberately once-only: `POST /auth/totp/enroll` refuses a second call with `ALREADY_ENROLLED`, because a silent re-enrollment would invalidate the authenticator the operator is holding. There is no API that creates an admin, so the collection cannot make itself a fresh one. Re-running against an already-enrolled admin fails at step 2, correctly.\n\nThat is also why this is a separate collection: the main one stays re-runnable and needs only `npm run dev`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "adminBaseUrl",
+      "value": "http://localhost:3100"
+    },
+    {
+      "key": "adminApi",
+      "value": "{{adminBaseUrl}}/admin/api/v1"
+    },
+    {
+      "key": "adminEmail",
+      "value": "admin@local.dev"
+    },
+    {
+      "key": "adminPassword",
+      "value": "change-me-before-prod"
+    },
+    {
+      "key": "challengeId",
+      "value": ""
+    },
+    {
+      "key": "adminTotpSecret",
+      "value": ""
+    },
+    {
+      "key": "adminTotpCode",
+      "value": ""
+    },
+    {
+      "key": "adminUserId",
+      "value": ""
+    },
+    {
+      "key": "targetUserId",
+      "value": ""
+    },
+    {
+      "key": "auditLogId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "00 Liveness & the 401 contrast",
+      "item": [
+        {
+          "name": "GET /health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the admin process is up', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().process).to.eql('admin');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{adminBaseUrl}}/health",
+            "description": "The only unauthenticated admin route there will ever be, besides /ready."
+          }
+        },
+        {
+          "name": "GET /users → 401 (not 404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('★★ 401 here, 404 on :3000 — that contrast IS the isolation', () => {",
+                  "  pm.response.to.have.status(401);",
+                  "  pm.expect(pm.response.json().code).to.eql('UNAUTHORIZED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{adminApi}}/users",
+            "description": "The main collection asserts the same path is 404 on :3000. Run both: the pair is 12 §10 test 1."
+          }
+        }
+      ]
+    },
+    {
+      "name": "01 First login — enrollment is mandatory",
+      "item": [
+        {
+          "name": "POST /auth/login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('a challenge, and NO cookie — a password is half a login', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.challengeId).to.be.a('string');",
+                  "  pm.expect(body.ttlSec).to.be.above(0);",
+                  "  pm.collectionVariables.set('challengeId', body.challengeId);",
+                  "});",
+                  "pm.test('★ enrollmentRequired — the seed writes no TOTP secret (12 §4.1)', () => {",
+                  "  pm.expect(pm.response.json().enrollmentRequired).to.eql(true);",
+                  "});",
+                  "pm.test('no session cookie was issued', () => {",
+                  "  const set = pm.response.headers.filter(h => h.key.toLowerCase() === 'set-cookie');",
+                  "  pm.expect(set.length).to.eql(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{adminApi}}/auth/login"
+          }
+        },
+        {
+          "name": "POST /auth/login — a wrong password is indistinguishable",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401, with the same body shape as every other failure', () => {",
+                  "  pm.response.to.have.status(401);",
+                  "  pm.expect(pm.response.json().details.reason).to.eql('INVALID_CREDENTIALS');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"definitely-not-it\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{adminApi}}/auth/login",
+            "description": "An unknown email, a wrong password, and a *player* with correct credentials all answer identically — and all pay for one argon2 verification, so the response time is not an oracle either."
+          }
+        },
+        {
+          "name": "POST /auth/totp/enroll",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the URI, the secret and ten recovery codes — once', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.otpauthUri).to.include('otpauth://totp/');",
+                  "  pm.expect(body.recoveryCodes).to.have.lengthOf(10);",
+                  "  pm.collectionVariables.set('adminTotpSecret', body.secret);",
+                  "  pm.collectionVariables.set('challengeId', body.challengeId);",
+                  "});",
+                  "pm.test('★ the recovery codes avoid I/O/0/1 — they get read aloud', () => {",
+                  "  pm.expect(pm.response.json().recoveryCodes.join('')).to.not.match(/[IO01]/);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"challengeId\": \"{{challengeId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{adminApi}}/auth/totp/enroll",
+            "description": "★ The ONLY route an unenrolled admin can reach. Everything in the response is unrecoverable afterwards: the secret is stored only as AES-256-GCM ciphertext and the codes only as sha256 hashes. There is no \"show me again\", because a route that could show them to you could show them to whoever has your cookie."
+          }
+        },
+        {
+          "name": "POST /auth/totp/enroll — a second time is refused",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('★ ALREADY_ENROLLED — re-enrolling would kill the operator’s app', () => {",
+                  "  pm.response.to.have.status(403);",
+                  "  pm.expect(pm.response.json().details.reason).to.eql('ALREADY_ENROLLED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"challengeId\": \"{{challengeId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{adminApi}}/auth/totp/enroll"
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 The second factor, and the replay guard",
+      "item": [
+        {
+          "name": "POST /auth/mfa — a wrong code",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401, and no session was created', () => {",
+                  "  pm.response.to.have.status(401);",
+                  "  pm.expect(pm.response.json().details.reason).to.eql('INVALID_MFA_CODE');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"challengeId\": \"{{challengeId}}\",\n  \"code\": \"000000\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{adminApi}}/auth/mfa"
+          }
+        },
+        {
+          "name": "POST /auth/login — a fresh challenge",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.collectionVariables.set('challengeId', pm.response.json().challengeId);",
+                  "});",
+                  "pm.test('no longer enrollmentRequired', () => {",
+                  "  pm.expect(pm.response.json().enrollmentRequired).to.be.undefined;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{adminApi}}/auth/login",
+            "description": "A challenge is single-use; the wrong code above spent the last one."
+          }
+        },
+        {
+          "name": "POST /auth/mfa — the real code",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// RFC 6238 in the Postman sandbox, so the collection can log itself in.",
+                  "// Same algorithm as backend/src/infrastructure/admin/totp.ts — base32 key,",
+                  "// HMAC-SHA1 over a 64-bit big-endian step counter, dynamic truncation.",
+                  "const secret = pm.collectionVariables.get('adminTotpSecret') || '';",
+                  "if (!secret) { throw new Error('run \"POST /auth/totp/enroll\" first — it sets adminTotpSecret'); }",
+                  "",
+                  "const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';",
+                  "let bits = '';",
+                  "for (const ch of secret.replace(/=+$/, '').toUpperCase()) {",
+                  "  const v = ALPHABET.indexOf(ch);",
+                  "  if (v >= 0) bits += v.toString(2).padStart(5, '0');",
+                  "}",
+                  "let hex = '';",
+                  "for (let i = 0; i + 8 <= bits.length; i += 8) {",
+                  "  hex += parseInt(bits.substr(i, 8), 2).toString(16).padStart(2, '0');",
+                  "}",
+                  "",
+                  "const step = Math.floor(Date.now() / 1000 / 30);",
+                  "const counter = step.toString(16).padStart(16, '0');",
+                  "const mac = CryptoJS.HmacSHA1(",
+                  "  CryptoJS.enc.Hex.parse(counter),",
+                  "  CryptoJS.enc.Hex.parse(hex),",
+                  ").toString(CryptoJS.enc.Hex);",
+                  "",
+                  "// Dynamic truncation — RFC 4226 §5.3. The low nibble of the last byte picks",
+                  "// the offset; the top bit of the selected word is masked off.",
+                  "const offset = parseInt(mac.substr(mac.length - 1, 1), 16) * 2;",
+                  "const binary = parseInt(mac.substr(offset, 8), 16) & 0x7fffffff;",
+                  "pm.collectionVariables.set('adminTotpCode', String(binary % 1000000).padStart(6, '0'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('★ signed in, with both admin cookies', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.role).to.be.oneOf(['ADMIN', 'SUPPORT']);",
+                  "  pm.collectionVariables.set('adminUserId', body.id);",
+                  "});",
+                  "pm.test('★ the cookies are Path=/admin and SameSite=Strict (12 §3.2)', () => {",
+                  "  const set = pm.response.headers.filter(h => h.key.toLowerCase() === 'set-cookie').map(h => h.value);",
+                  "  const access = set.find(v => v.startsWith('admin_access='));",
+                  "  const refresh = set.find(v => v.startsWith('admin_refresh='));",
+                  "  pm.expect(access, 'admin_access present').to.be.a('string');",
+                  "  pm.expect(refresh, 'admin_refresh present').to.be.a('string');",
+                  "  for (const cookie of [access, refresh]) {",
+                  "    pm.expect(cookie).to.include('Path=/admin');",
+                  "    pm.expect(cookie).to.include('HttpOnly');",
+                  "    pm.expect(cookie).to.include('SameSite=Strict');",
+                  "  }",
+                  "});",
+                  "pm.test('stepUpValidUntil is in the future — the ⚡ window is open', () => {",
+                  "  pm.expect(new Date(pm.response.json().stepUpValidUntil).getTime()).to.be.above(Date.now());",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"challengeId\": \"{{challengeId}}\",\n  \"code\": \"{{adminTotpCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{adminApi}}/auth/mfa",
+            "description": "The pre-request script computes the code from the secret the enroll step captured — the same RFC 6238 algorithm the server runs."
+          }
+        },
+        {
+          "name": "POST /auth/login — for the replay attempt",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.collectionVariables.set('challengeId', pm.response.json().challengeId);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{adminApi}}/auth/login"
+          }
+        },
+        {
+          "name": "★★ POST /auth/mfa — the SAME code again",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('★★ refused, though the code is still on the phone’s screen', () => {",
+                  "  pm.response.to.have.status(401);",
+                  "  pm.expect(pm.response.json().details.reason).to.eql('INVALID_MFA_CODE');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"challengeId\": \"{{challengeId}}\",\n  \"code\": \"{{adminTotpCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{adminApi}}/auth/mfa",
+            "description": "★★ No pre-request script here: it deliberately reuses `adminTotpCode` from the successful login above, unchanged and still inside its 30-second window.\n\nThis is `AdminCredential.lastTotpStep`. Without it a code stays valid however often it is presented — so shoulder-surfing one, or pulling one out of a proxy log, buys a login. It is the entire value of the second factor."
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 Session & reads (S49, S50)",
+      "item": [
+        {
+          "name": "GET /auth/me",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the identity, with all three clocks', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.mfaAt).to.be.a('string');",
+                  "  pm.expect(body.stepUpValidUntil).to.be.a('string');",
+                  "  pm.expect(body.sessionExpiresAt).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{adminApi}}/auth/me"
+          }
+        },
+        {
+          "name": "GET /metrics",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('★ S15’s route, on :3100 where it belongs (12 §11.1)', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().counters.admin_logins).to.be.above(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{adminApi}}/metrics"
+          }
+        },
+        {
+          "name": "GET /security-events",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the audit trail S15 has been filling since Phase C', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().items).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{adminApi}}/security-events?limit=5"
+          }
+        },
+        {
+          "name": "GET /users",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('cursor-paginated, newest first', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.items).to.be.an('array');",
+                  "  pm.expect(body).to.have.property('nextCursor');",
+                  "  const other = body.items.find(u => u.id !== pm.collectionVariables.get('adminUserId'));",
+                  "  if (other) pm.collectionVariables.set('targetUserId', other.id);",
+                  "});",
+                  "pm.test('★ no password hash, ever', () => {",
+                  "  const raw = pm.response.text();",
+                  "  pm.expect(raw).to.not.include('passwordHash');",
+                  "  pm.expect(raw).to.not.include('argon2');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{adminApi}}/users?limit=25"
+          }
+        },
+        {
+          "name": "GET /users/:id — the acting admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('profile plus the CACHED wallet balances', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.wallets).to.be.an('array');",
+                  "});",
+                  "pm.test('★ still no password hash on the detail page', () => {",
+                  "  pm.expect(pm.response.text()).to.not.include('passwordHash');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{adminApi}}/users/{{adminUserId}}",
+            "description": "★ Shows the cached balance and does NOT recompute Σ ledger. `POST /wallets/:id/reconcile` (M2) is where the two are compared — a detail page that silently reconciled would hide exactly the drift E1 exists to surface."
+          }
+        },
+        {
+          "name": "GET /audit",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('★ the login is itself audited', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const items = pm.response.json().items;",
+                  "  pm.expect(items.some(e => e.action === 'admin.login')).to.eql(true);",
+                  "});",
+                  "pm.test('every row carries actor, ip, requestId and its chain links', () => {",
+                  "  const row = pm.response.json().items[0];",
+                  "  pm.expect(row.actorUserId).to.be.a('string');",
+                  "  pm.expect(row.actorIp).to.be.a('string');",
+                  "  pm.expect(row.requestId).to.be.a('string');",
+                  "  pm.expect(row.hash).to.match(/^[0-9a-f]{64}$/);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{adminApi}}/audit?limit=10",
+            "description": "Logins are audited too: \"who was in the console at 3am\" is an audit question, and a log that recorded only writes could not answer it."
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 ★★ The one write, and the guards in front of it",
+      "item": [
+        {
+          "name": "POST /users/:id/disable — no reason → REASON_REQUIRED",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('★ 400 REASON_REQUIRED, and nothing was written', () => {",
+                  "  pm.response.to.have.status(400);",
+                  "  pm.expect(pm.response.json().code).to.eql('REASON_REQUIRED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{adminApi}}/users/{{targetUserId}}/disable",
+            "description": "`reason` is a column and an error, not a UI placeholder. Six months from now \"who disabled this account\" is answerable from the row, and \"why\" only if somebody was made to type it."
+          }
+        },
+        {
+          "name": "POST /users/:id/disable — self → SELF_TARGET_FORBIDDEN",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('★ 409 — an admin may not aim this at themselves', () => {",
+                  "  pm.response.to.have.status(409);",
+                  "  pm.expect(pm.response.json().code).to.eql('SELF_TARGET_FORBIDDEN');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"testing the self-target guard\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{adminApi}}/users/{{adminUserId}}/disable",
+            "description": "The realistic version is not malice: it is an operator with two tabs open. Recovery from a console nobody can sign into is CLI plus database access, at whatever hour it happens."
+          }
+        },
+        {
+          "name": "★ POST /users/:id/disable — the real thing",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('★ disabled, with the reason recorded on the row', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.user.status).to.eql('DISABLED');",
+                  "  pm.expect(body.user.statusReason).to.eql('postman: testing the audit spine');",
+                  "  pm.collectionVariables.set('auditLogId', body.auditLogId);",
+                  "});",
+                  "pm.test('★ every refresh family died, not just the newest', () => {",
+                  "  pm.expect(pm.response.json()).to.have.property('refreshFamiliesRevoked');",
+                  "});",
+                  "pm.test('★ and a ControlCommand was queued for the api process (12 §6.1)', () => {",
+                  "  pm.expect(pm.response.json().controlCommandId).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"postman: testing the audit spine\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{adminApi}}/users/{{targetUserId}}/disable",
+            "description": "★★ Then open `npm run db:studio` and look at the disabled player’s Wallet and WalletTransaction rows.\n\nThe balance is UNCHANGED and there is no new row of any kind. That is invariant A8: forfeiture punishes idling, not operations. Without it, an operator looking into a report would fine the person they were looking into."
+          }
+        },
+        {
+          "name": "GET /audit — the row it just wrote",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('★ actor, ip, reason and the before/after diff', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const row = pm.response.json().items.find(e => e.id === pm.collectionVariables.get('auditLogId'));",
+                  "  pm.expect(row, 'the disable’s audit row').to.be.an('object');",
+                  "  pm.expect(row.action).to.eql('user.disable');",
+                  "  pm.expect(row.reason).to.eql('postman: testing the audit spine');",
+                  "  pm.expect(row.before.status).to.eql('ACTIVE');",
+                  "  pm.expect(row.after.status).to.eql('DISABLED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{adminApi}}/audit?limit=10"
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 ★★ The chain",
+      "item": [
+        {
+          "name": "GET /audit/verify",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('★★ clean, and it says how many rows it walked', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.ok).to.eql(true);",
+                  "  pm.expect(body.checked).to.be.above(0);",
+                  "  pm.expect(body.brokenAt).to.eql(null);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{adminApi}}/audit/verify",
+            "description": "★★ Now break it by hand and run this again:\n\n```\nsqlite3 prisma/dev.db \"DELETE FROM AdminAuditLog WHERE id = (SELECT id FROM AdminAuditLog ORDER BY createdAt LIMIT 1 OFFSET 1)\"\n```\n\n→ `{ ok: false, brokenAt: { index: 1, reason: \"PREV_HASH_MISMATCH\" } }`.\n\nEdit a row’s `reason` in place instead and the reason becomes `HASH_MISMATCH`: one means history was **deleted**, the other that it was **rewritten**, and an investigator needs to know which."
+          }
+        },
+        {
+          "name": "POST /auth/logout",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('204, and the session is revoked', () => {",
+                  "  pm.response.to.have.status(204);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{adminApi}}/auth/logout"
+          }
+        },
+        {
+          "name": "GET /auth/me — after logout",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 — the session really is gone', () => {",
+                  "  pm.response.to.have.status(401);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{adminApi}}/auth/me"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,254 @@
+### Phase L — the admin spine (S48–S50). 12-admin-console.md §3, §5.
+###
+### Everything here is on :3100. Nothing here answers on :3000, ever — that is
+### the point of the phase, and block 0 proves it before anything else runs.
+###
+### Two things you need before block 2:
+###   1. an authenticator app on your phone (any TOTP app), and
+###   2. `ADMIN_TOTP_ENC_KEY` in backend/.env:
+###        openssl rand -base64 32
+###      The admin process refuses to boot without it. That refusal is
+###      deliberate — see the docblock in src/admin-main.ts.
+###
+### Then, in two terminals:
+###   cd backend && PORT=3999 npm run dev          # the public API
+###   cd backend && npm run dev:admin              # the admin API, :3100
+
+@public = http://localhost:3999
+@admin  = http://localhost:3100
+@api    = {{admin}}/admin/api/v1
+
+### ─── 0. Isolation. Run these FIRST, and read the status codes. ──────────────
+
+### ★★ 404. Not 401 — the route is not there, and a 401 would confirm it exists.
+GET {{public}}/admin/api/v1/users
+Accept: application/json
+
+###
+### 404 as well. S15's two routes moved here at S49 (12 §11.1).
+GET {{public}}/admin/api/v1/metrics
+
+###
+### 200 — the admin process is up. The only unauthenticated admin route.
+GET {{admin}}/health
+
+###
+### 401 — the same path on :3100 exists and refuses you. That contrast IS the
+### isolation: 404 there, 401 here.
+GET {{api}}/users
+
+### ─── 1. First login: enrollment is mandatory ────────────────────────────────
+
+### ★ Step one. Returns a challenge and NO cookie: a correct password is half
+### of an admin login, not all of it.
+# @name login
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@local.dev",
+  "password": "change-me-before-prod"
+}
+
+### → { challengeId, ttlSec: 120, enrollmentRequired: true }
+###   `enrollmentRequired` is the seed's `totpEnrolledAt: null` (12 §4.1).
+###   The seed never writes a TOTP secret — every deployment of this codebase
+###   shipping with the same second factor would be worse than having none.
+
+###
+### ★★ Enrollment. The ONLY route an unenrolled admin can reach.
+###
+### Everything in the response is unrecoverable afterwards: the secret is stored
+### only as AES-256-GCM ciphertext and the recovery codes only as sha256 hashes.
+### There is deliberately no "show me again" — a route that could show them to
+### you could show them to whoever has your cookie.
+###
+### ★ SAVE THE RECOVERY CODES SOMEWHERE THAT IS NOT THIS MACHINE.
+# @name enroll
+POST {{api}}/auth/totp/enroll
+Content-Type: application/json
+
+{
+  "challengeId": "{{login.response.body.challengeId}}"
+}
+
+### → { otpauthUri, secret, recoveryCodes: [10], challengeId }
+###   Paste `otpauthUri` into your authenticator app (or turn it into a QR with
+###   `qrencode -t ansiutf8 '<uri>'`). The app starts showing six digits.
+
+###
+### ★ Step two. Replace 000000 with what your phone is showing RIGHT NOW.
+POST {{api}}/auth/mfa
+Content-Type: application/json
+
+{
+  "challengeId": "{{enroll.response.body.challengeId}}",
+  "code": "000000"
+}
+
+### → 200 + the admin identity, and two cookies:
+###     admin_access   15 min, JWT, names the AdminSession
+###     admin_refresh  8 h absolute, opaque, HMAC'd into AdminSession.tokenHash
+###   Both are Path=/admin, SameSite=Strict. Check them in DevTools.
+
+###
+### ★★ NOW RUN THE MFA BLOCK ABOVE AGAIN, UNCHANGED, WITH THE SAME SIX DIGITS.
+###
+### → 401 INVALID_MFA_CODE, even though the code is still on your phone's
+###   screen and still arithmetically correct.
+###
+###   That is `AdminCredential.lastTotpStep`, and it is the entire value of a
+###   second factor: without it, a code is valid for its whole 30-second window
+###   however many times it is presented — so shoulder-surfing one, or pulling
+###   one out of a proxy log, buys a login.
+
+### ─── 2. The session ─────────────────────────────────────────────────────────
+
+GET {{api}}/auth/me
+
+### → { id, email, role, mfaAt, stepUpValidUntil, sessionExpiresAt }
+###   `stepUpValidUntil` is mfaAt + ADMIN_STEPUP_WINDOW_MIN. The console counts
+###   down from it so it can ask for a code BEFORE a destructive action fails.
+
+###
+### Rotates admin_refresh. Note what does NOT move: sessionExpiresAt. Rotation
+### renews the token, never the 8-hour absolute cap — otherwise a tab left open
+### would be a session that never ends.
+POST {{api}}/auth/refresh
+
+### ─── 3. The read endpoints (S50) ────────────────────────────────────────────
+
+GET {{api}}/users?limit=10
+
+###
+### ★ Search by email, id, or display name. Note: display-name matching is
+### case-SENSITIVE on Postgres and not on SQLite — see `UserSearchFilter.query`.
+GET {{api}}/users?q=me@test.dev
+
+###
+### Replace with a real id from the list above.
+GET {{api}}/users/REPLACE_WITH_A_USER_ID
+
+### → the profile, the status history, and the CACHED wallet balances.
+###   ★ Deliberately cached, not recomputed: `POST /wallets/:id/reconcile` (M2)
+###     is where `Σ ledger` is compared against the column. A detail page that
+###     silently reconciled would hide exactly the drift E1 exists to surface.
+###   ★ And grep the response for `passwordHash`. It is not there, and a test
+###     asserts that it never will be.
+
+###
+GET {{api}}/audit?limit=5
+
+### → actor, ip, userAgent, requestId, action, target, reason, before/after,
+###   prevHash, hash. The hashes travel so you can recompute a row yourself.
+
+### ─── 4. ★★ The one write, and the three refusals in front of it ─────────────
+
+### Put a real, NON-ADMIN user id here. Do not use your own.
+@target = REPLACE_WITH_A_USER_ID
+
+### ★ Refusal 1 — no reason. 400 REASON_REQUIRED, and NOTHING is written.
+### `reason` is a column and an error, not a UI placeholder: six months from now
+### "who disabled this account" is answerable from the row, and "why" only if
+### somebody was made to type it.
+POST {{api}}/users/{{target}}/disable
+Content-Type: application/json
+
+{}
+
+###
+### ★ Refusal 2 — self-target. 409 SELF_TARGET_FORBIDDEN.
+### The realistic version of this is not malice: it is an operator with two tabs
+### open. Recovery from a console nobody can sign into is CLI plus database
+### access, at whatever hour it happens.
+POST {{api}}/users/REPLACE_WITH_YOUR_OWN_ADMIN_ID/disable
+Content-Type: application/json
+
+{ "reason": "testing the self-target guard" }
+
+###
+### ★★ Refusal 3 — the step-up window. To see it, WAIT SIX MINUTES after your
+### last code (ADMIN_STEPUP_WINDOW_MIN defaults to 5) and then send the real
+### disable below.
+###
+### → 401 STEP_UP_REQUIRED, and — the half that matters — no audit row and no
+###   status change. A step-up checked inside the handler, after the first
+###   await, would be a confirmation dialog rather than a control.
+###
+### Then get past it with a fresh code:
+POST {{api}}/auth/stepup
+Content-Type: application/json
+
+{ "code": "000000" }
+
+###
+### ★ The real thing.
+# @name disable
+POST {{api}}/users/{{target}}/disable
+Content-Type: application/json
+
+{ "reason": "testing the audit spine" }
+
+### → { user: { status: 'DISABLED', statusReason }, refreshFamiliesRevoked,
+###     adminSessionsRevoked, auditLogId, controlCommandId }
+###
+### ★★ THE ONE THING TO LOOK HARDEST AT: open `npm run db:studio` and check the
+###    disabled player's Wallet and WalletTransaction rows. The balance is
+###    UNCHANGED and there is no new row of any kind.
+###
+###    That is invariant A8. An ejection for idling forfeits the match (10 §5.1)
+###    because forfeiture punishes idling; a platform-initiated interruption is
+###    not idling. Without A8, an operator looking into a report would fine the
+###    person they were looking into.
+###
+### And `refreshFamiliesRevoked` should be the number of devices they were
+### signed in on — every family, not just the newest. A laptop left signed in
+### would otherwise keep minting access tokens for thirty days.
+
+### ─── 5. ★★ The audit chain, and breaking it on purpose ──────────────────────
+
+GET {{api}}/audit?limit=1
+
+### → the row your disable just wrote. Note `prevHash` and `hash`.
+
+###
+### Clean, and it says how many rows it walked.
+GET {{api}}/audit/verify
+
+### → { ok: true, checked: N, brokenAt: null }
+
+###
+### ★★ NOW BREAK IT. In another terminal:
+###
+###   sqlite3 prisma/dev.db "DELETE FROM AdminAuditLog \
+###     WHERE id = (SELECT id FROM AdminAuditLog ORDER BY createdAt LIMIT 1 OFFSET 1)"
+###
+### then run this again:
+GET {{api}}/audit/verify
+
+### → { ok: false, brokenAt: { index: 1, entryId, reason: 'PREV_HASH_MISMATCH',
+###     expected, actual } }
+###
+### ★ `PREV_HASH_MISMATCH` means a row is MISSING from between two survivors —
+###   the classic "delete the evidence". Edit a row's `reason` in place instead
+###   and you get `HASH_MISMATCH`, because its own content no longer hashes to
+###   its own hash. The two are distinguished on purpose: an investigator needs
+###   to know whether history was deleted or rewritten.
+###
+### What this does NOT claim: the chain cannot stop somebody with database
+### access from deleting a row. It makes doing so impossible to do QUIETLY —
+### every hash after the break has to be rewritten too — which is the strongest
+### honest guarantee a log the application writes can offer.
+
+### ─── 6. Lockout ─────────────────────────────────────────────────────────────
+
+### Log in fresh, then send /auth/mfa with 000000 five times. On the fifth:
+### → 423 ADMIN_LOCKED, with `lockedUntil` in the details.
+###
+### Then check SecurityEvent in Studio: an ALERT row, reason ADMIN_MFA_LOCKOUT.
+### Five wrong codes against a console account is somebody working through a
+### six-digit space, not an operator fumbling.
+###
+### ★ And note that the lock holds against the CORRECT code too. A lockout a
+###   valid code could lift would only ever inconvenience the legitimate
+###   operator, since the attacker does not have one.

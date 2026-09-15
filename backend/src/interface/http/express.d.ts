@@ -1,5 +1,7 @@
 import type { Identity } from '../../contracts/dto/auth.js'
+import type { AdminSession } from '../../domain/entities/admin.js'
 import type { Table } from '../../domain/entities/table.js'
+import type { User } from '../../domain/entities/user.js'
 
 /**
  * The two things middleware attaches to a request.
@@ -37,6 +39,25 @@ declare global {
        * row the guard approved differs from the row the handler edits.
        */
       table?: Table
+
+      /**
+       * Set by `adminAuthenticate` — 12 §3.2, and **only ever on `:3100`**.
+       *
+       * The declaration is global because Express's `Request` is, not because
+       * the public app can produce one: no middleware mounted by `app.ts`
+       * writes this field, and `interface/http/**` cannot even import the
+       * middleware that does (ESLint guard 4). A route on the public port that
+       * read `req.admin` would find `undefined`, for ever.
+       *
+       * It carries the **session and the user**, not a role string, because
+       * every admin decision needs one of the three clocks on the session:
+       * `requireStepUp` reads `mfaAt`, the idle check reads `lastSeenAt`, and
+       * the audit context reads the actor's id from the user.
+       */
+      admin?: {
+        readonly session: AdminSession
+        readonly user: User
+      }
     }
   }
 }

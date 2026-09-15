@@ -2,6 +2,12 @@ import type { PrismaClient } from '@prisma/client'
 import type { IUnitOfWork, Repositories } from '../../domain/repositories/Repositories.js'
 import type { Db } from './mappers.js'
 import {
+  PrismaAdminAuditRepository,
+  PrismaAdminCredentialRepository,
+  PrismaAdminSessionRepository,
+  PrismaControlCommandRepository,
+} from './repositories/admin.js'
+import {
   PrismaCosmeticRepository,
   PrismaRewardRuleRepository,
   PrismaSubscriptionRepository,
@@ -58,6 +64,11 @@ export function buildRepositories(db: Db): Repositories {
     rewardRules: new PrismaRewardRuleRepository(db),
     subscriptions: new PrismaSubscriptionRepository(db),
     cosmetics: new PrismaCosmeticRepository(db),
+
+    adminCredentials: new PrismaAdminCredentialRepository(db),
+    adminSessions: new PrismaAdminSessionRepository(db),
+    adminAudit: new PrismaAdminAuditRepository(db),
+    controlCommands: new PrismaControlCommandRepository(db),
   }
 }
 

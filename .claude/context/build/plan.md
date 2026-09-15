@@ -146,6 +146,10 @@ in particular the one that needs doing by hand: corrupt a balance and watch the 
 
 ### Phase L — Admin spine (`Documents/12-admin-console.md` §11.1)
 
+_Built and green, **out of order** — Mehrang chose to skip Phase K to code and
+take Phase L first (2026-09-15). The only two things L wanted from K are deploy
+artifacts, recorded as debt in `context.md`; no code in L depends on them._
+
 - [ ] S48 Admin schema + `admin-main.ts` + the three isolation guards
 - [ ] S49 Admin auth: TOTP, forced enrollment, step-up, sessions
 - [ ] S50 ⭐ The `withAudit` spine + first read endpoints + M0's admin gate

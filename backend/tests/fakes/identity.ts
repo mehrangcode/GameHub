@@ -16,6 +16,7 @@ import type {
   NewSecurityEvent,
   NewUser,
   SecurityEventFilter,
+  UserSearchFilter,
 } from '../../src/domain/repositories/identity.js'
 import type { PageQuery } from '../../src/domain/repositories/IRepository.js'
 import { EmailTakenError } from '../../src/domain/errors/errors.js'
@@ -70,6 +71,30 @@ export class InMemoryUserRepository implements IUserRepository {
 
   async touchLastSeen(id: string, at: Date): Promise<void> {
     this.rows.patch(id, { lastSeenAt: at })
+  }
+
+  async search(filter: UserSearchFilter, page: PageQuery = {}): Promise<User[]> {
+    const query = filter.query?.trim()
+    const needle = query?.toLowerCase()
+
+    return paginate(
+      this.rows.all().filter((user) => {
+        if (filter.status !== undefined && user.status !== filter.status) return false
+        if (filter.role !== undefined && user.role !== filter.role) return false
+        if (filter.createdAfter !== undefined && user.createdAt < filter.createdAfter) return false
+        if (filter.createdBefore !== undefined && user.createdAt > filter.createdBefore) return false
+        if (needle === undefined || needle === '') return true
+
+        return (
+          user.id === query ||
+          user.email.includes(needle) ||
+          // Case-*sensitive*, matching Prisma's `contains` on Postgres. The
+          // fake must not be kinder than the database it stands in for.
+          user.displayName.includes(query!)
+        )
+      }),
+      page,
+    )
   }
 }
 

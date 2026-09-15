@@ -29,6 +29,24 @@ export const ERROR_CODES = [
   'INSUFFICIENT_FUNDS',
   'CAP_REJECTED',
   'SEAT_NOT_RECLAIMABLE',
+
+  /**
+   * 12-admin-console.md §5.1 — the admin console's six. They live in the shared
+   * taxonomy rather than a parallel one because `AppError.code` is typed by
+   * `ErrorCode`: a second enum would mean a second base class, a second error
+   * middleware, and eventually two answers to "what does a 403 body look like".
+   *
+   * The public API can never emit any of them — no route on `:3000` constructs
+   * one — but the *shape* is identical, which is what lets `admin-frontend/`
+   * (MA) reuse the same error rendering.
+   */
+  'STEP_UP_REQUIRED',
+  'MFA_REQUIRED',
+  'MFA_ENROLLMENT_REQUIRED',
+  'ADMIN_LOCKED',
+  'REASON_REQUIRED',
+  'SELF_TARGET_FORBIDDEN',
+
   'INTERNAL',
 ] as const
 

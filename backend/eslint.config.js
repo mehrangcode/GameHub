@@ -4,8 +4,7 @@ import tseslint from 'typescript-eslint'
 import prettier from 'eslint-config-prettier'
 
 /**
- * The three load-bearing architecture guards (11-build-plan.md S01).
- * A fourth — the `interface/admin/**` import ban — arrives in S48.
+ * The four load-bearing architecture guards (11-build-plan.md S01, S48).
  *
  * These are not style rules. Deleting one of them silently re-opens an
  * architectural hole, which is why tests/unit/lint-guards.test.ts proves
@@ -34,6 +33,32 @@ const ECONOMY_IMPORT_BAN = {
   message:
     'domain/games/** may not import application/ or anything wallet/reward/matchmaking related. ' +
     'Table chips are not wallet coins (10-economy-and-rewards.md E5) and engines never see money.',
+}
+
+/**
+ * ★ Guard 4 — 12-admin-console.md §2.4, layer 1 of three (S48).
+ *
+ * The public app may not reach the admin routers. Not "should not": an import
+ * is the only way `app.ts` could mount one, so banning the import removes the
+ * mechanism rather than relying on review to notice it.
+ *
+ * The ban is **one-directional**. `interface/admin/**` importing
+ * `interface/http/middleware/error.js` is correct and intended — the two apps
+ * must agree on what an error, a request id and a validated body look like, and
+ * forking that would give the console its own error taxonomy within a month.
+ */
+const ADMIN_IMPORT_BAN = {
+  // Matched against the **import string as written**, not the resolved path, so
+  // the patterns have to cover every way a relative path can reach the folder:
+  // `./admin/…`, `../../admin/…`, `../../interface/admin/…`. A single
+  // `**/interface/admin/**` would miss `../../admin/middleware/x.js` entirely,
+  // which is how a ban ends up passing its own test and catching nothing —
+  // `tests/unit/lint-guards.test.ts` lints that exact string for this reason.
+  group: ['**/admin/**', 'admin/**', '**/admin-app*', '**/admin-main*'],
+  message:
+    'The public app must not import interface/admin/** (12-admin-console.md §2.4). ' +
+    'Admin routers are mounted by admin-main.ts on :3100 alone. If you are adding a role ' +
+    'check to a route on :3000, the route belongs in interface/admin/ instead.',
 }
 
 export default tseslint.config(
@@ -111,6 +136,19 @@ export default tseslint.config(
     files: ['src/domain/games/**/*.ts'],
     rules: {
       'no-restricted-imports': ['error', { patterns: [INFRA_IMPORT_BAN, ECONOMY_IMPORT_BAN] }],
+    },
+  },
+
+  // ── Guard 4: the admin console stays off the public port ─────────────────
+  {
+    files: [
+      'src/app.ts',
+      'src/main.ts',
+      'src/interface/http/**/*.ts',
+      'src/interface/socket/**/*.ts',
+    ],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: [ADMIN_IMPORT_BAN] }],
     },
   },
 

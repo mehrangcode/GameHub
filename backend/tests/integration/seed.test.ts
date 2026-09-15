@@ -32,6 +32,9 @@ async function counts() {
     wallets: await db.wallet.count(),
     transactions: await db.walletTransaction.count(),
     cosmeticGrants: await db.userCosmetic.count(),
+    gameFlags: await db.gameFlag.count(),
+    platformFlags: await db.platformFlag.count(),
+    adminCredentials: await db.adminCredential.count(),
   }
 }
 
@@ -179,6 +182,52 @@ describe('seed', () => {
     expect(invite).not.toBeNull()
     expect(invite?.revokedAt).toBeNull()
     expect(invite!.expiresAt.getTime()).toBeGreaterThan(Date.now())
+  })
+
+  // ── 12-admin-console.md §4.1 — the admin seed additions (S48) ────────────
+
+  it('★ seeds one ENABLED GameFlag per game in the public catalog', async () => {
+    const flags = await db.gameFlag.findMany({ orderBy: { slug: 'asc' } })
+
+    expect(flags.map((f) => f.slug)).toEqual(['blackjack', 'chess', 'poker', 'shelem', 'sudoku'])
+    expect(flags.every((f) => f.state === 'ENABLED')).toBe(true)
+    // The rows exist so that "turn this game off" is an UPDATE, not an INSERT
+    // the operator has to get right while something is on fire.
+    expect(flags.every((f) => f.updatedByUserId === null)).toBe(true)
+  })
+
+  it('does NOT flag the dev-only fixture game — it is a harness, not a product', async () => {
+    expect(await db.gameFlag.findUnique({ where: { slug: 'fixture' } })).toBeNull()
+  })
+
+  it('seeds the two v1 platform flags, with JSON values (rule 3)', async () => {
+    const maintenance = await db.platformFlag.findUnique({ where: { key: 'maintenance' } })
+    const registration = await db.platformFlag.findUnique({ where: { key: 'registrationOpen' } })
+
+    expect(JSON.parse(maintenance!.value)).toEqual({ on: false })
+    expect(JSON.parse(registration!.value)).toBe(true)
+  })
+
+  it('★★ seeds an AdminCredential that is UNENROLLED — and holds no secret', async () => {
+    const credential = await db.adminCredential.findFirst()
+
+    expect(credential).not.toBeNull()
+    // The whole of S49's "a fresh admin can reach nothing but the enrollment
+    // route" rests on this one null.
+    expect(credential?.totpEnrolledAt).toBeNull()
+    expect(credential?.lastTotpStep).toBeNull()
+    expect(credential?.failedAttempts).toBe(0)
+    expect(credential?.lockedUntil).toBeNull()
+    // ★ A seed that generated a secret would ship every deployment of this
+    // codebase with the same second factor — worse than having none at all.
+    expect(credential?.totpSecretEnc).toBe('')
+    expect(JSON.parse(credential!.recoveryCodeHashes)).toEqual([])
+  })
+
+  it('the seeded admin holds the ADMIN role', async () => {
+    const admin = await db.user.findFirst({ where: { role: 'ADMIN' } })
+    expect(admin).not.toBeNull()
+    expect(admin?.status).toBe('ACTIVE')
   })
 
   it('seeds catalog only under NODE_ENV=production', async () => {

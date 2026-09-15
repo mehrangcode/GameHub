@@ -3420,6 +3420,145 @@
       ]
     },
     {
+      "name": "12 Admin isolation (S48)",
+      "description": "The half of Phase L that needs no admin process running: proof that :3000 carries no admin surface at all.\n\nThe full admin flow — TOTP enrollment, the replay guard, the audit chain — lives in its own collection, postman/Template.admin.postman_collection.json, because it needs a second process on :3100 and because enrollment is deliberately once-only and therefore not re-runnable against the same database.",
+      "item": [
+        {
+          "name": "GET /admin/api/v1/users → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('★★ 404, not 401 — the route is not there', () => {",
+                  "  pm.response.to.have.status(404);",
+                  "  pm.expect(pm.response.json().code).to.eql('NOT_FOUND');",
+                  "});",
+                  "pm.test('★ a 401 would confirm the admin surface exists here', () => {",
+                  "  pm.expect(pm.response.code).to.not.eql(401);",
+                  "  pm.expect(pm.response.code).to.not.eql(403);",
+                  "});",
+                  "pm.test('and says nothing about where the admin app lives', () => {",
+                  "  const raw = pm.response.text();",
+                  "  pm.expect(raw).to.not.include('3100');",
+                  "  pm.expect(raw).to.not.include('admin-main');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/admin/api/v1/users",
+            "description": "12-admin-console.md §2.4, §10 test 1. This request never gets deleted: it is the outside-the-process proof that survives someone removing the ESLint guard and the mount-time guard in a refactor."
+          }
+        },
+        {
+          "name": "GET /admin/api/v1/metrics → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('S15’s metrics route is NOT on the public port (12 §11.1)', () => {",
+                  "  pm.response.to.have.status(404);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/admin/api/v1/metrics",
+            "description": "S15 originally specified `/metrics` and `/security-events` on :3000 behind a role check — exactly the arrangement §2.4 exists to prevent. S49 moved both to :3100. This asserts the move stuck."
+          }
+        },
+        {
+          "name": "GET /admin/api/v1/security-events → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('and neither is the security-event feed', () => {",
+                  "  pm.response.to.have.status(404);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/admin/api/v1/security-events"
+          }
+        },
+        {
+          "name": "POST /admin/api/v1/users/x/disable → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('★ mutating verbs are refused too, not only GET', () => {",
+                  "  pm.response.to.have.status(404);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"probe\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/admin/api/v1/users/x/disable",
+            "description": "A 404-on-GET that became a 405-on-POST would mean Express knew about the path. It does not."
+          }
+        },
+        {
+          "name": "GET /api/v1/admin/users → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the prefixes do not nest — /api/v1/admin is not a back door', () => {",
+                  "  pm.response.to.have.status(404);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/admin/users",
+            "description": "`/admin/api/v1` and `/api/v1` are disjoint roots on purpose (config/constants.ts): nesting them would put the console one missing mount guard away from the public port."
+          }
+        }
+      ]
+    },
+    {
       "name": "11 Teardown",
       "description": "Closes the table and ends the session. Run last — everything above needs both.",
       "item": [

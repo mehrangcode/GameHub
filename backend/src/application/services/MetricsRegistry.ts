@@ -161,6 +161,20 @@ export const COUNTERS = [
   'guest_forfeits',
   'reconciliations_run',
   'reconciliation_drift_detected',
+
+  // ── 12-admin-console.md, S49 ─────────────────────────────────────────────
+  //   `admin_mfa_failed` is the one worth watching. A handful a week is an
+  //   operator fumbling a code; a burst is somebody working through a
+  //   six-digit space, and `admin_locked` firing says the ladder caught them.
+  'admin_logins',
+  'admin_logins_failed',
+  'admin_mfa_failed',
+  'admin_locked',
+  'admin_totp_enrollments',
+  'admin_recovery_codes_used',
+  'admin_step_ups',
+  'admin_audit_rows',
+  'admin_users_disabled',
 ] as const
 
 /** Point-in-time values that go up and down. */
