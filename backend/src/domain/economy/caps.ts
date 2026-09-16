@@ -60,6 +60,11 @@ export type CapCode = (typeof CAP_CODES)[number]
  *     swallowed the correction would make the ledger less true, not more.
  *   - `REFUND` returns coins the holder already had.
  *   - `PURCHASE`/`GUEST_FORFEIT` are debits; a negative amount is not an earn.
+ *   - `HINT_GRANT`/`HINT_SPEND` move a different asset entirely. Every number
+ *     below is denominated in **coins**, so measuring a 1-point hint grant
+ *     against a 500-coin hourly ceiling would be a category error that happened
+ *     to pass. Hint points have their own ceiling (20, `games/sudoku.md` §13.1),
+ *     applied by the service that grants them.
  */
 export const EARN_KINDS: readonly TransactionKind[] = [
   'MATCH_REWARD',

@@ -10,10 +10,20 @@ import { Button } from './Button'
 import { Icon, type IconName } from './Icon'
 import styles from './AppShell.module.css'
 
+/**
+ * What the header purse shows, in order.
+ *
+ * Deliberately **not** derived from `ASSET_CODES`: an asset needs an icon and a
+ * label before it can be rendered, so a new code appearing in the contract
+ * should leave the purse alone rather than render a blank chip. `HINT` is here
+ * because a hint point is spendable and a player needs to know they have one
+ * before they are mid-puzzle wondering why the button is dark.
+ */
 const PURSE: { asset: AssetCode; icon: IconName }[] = [
   { asset: 'COIN', icon: 'coin' },
   { asset: 'GEM', icon: 'gem' },
   { asset: 'TICKET', icon: 'ticket' },
+  { asset: 'HINT', icon: 'hint' },
 ]
 
 /**

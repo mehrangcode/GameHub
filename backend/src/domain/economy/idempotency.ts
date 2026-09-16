@@ -24,6 +24,8 @@ import type { HolderKey } from '../value-objects/identity.js'
  * | Achievement | `achv:{achievementId}:{holderKey}` |
  * | Premium grant | `premium:{subscriptionId}:{periodIndex}` |
  * | Guest vesting | `vest:{guestSessionId}` |
+ * | Hint point earned | `sudoku-hint:{userId}:{milestone}` |
+ * | Hint point spent | `sudoku-hint-spend:{gameId}:{seat}:{seq}` |
  */
 
 /** UTC, always. A key that depended on the server's timezone would not be derived. */
@@ -69,6 +71,33 @@ export function guestVestKey(guestSessionId: string): string {
  */
 export function guestForfeitKey(guestSessionId: string): string {
   return `forfeit:${guestSessionId}`
+}
+
+/**
+ * `games/sudoku.md` §13.1 — a hint point is earned every 3 solved puzzles, so
+ * the key is the **milestone**, `floor(solves / 3)`, not the match that happened
+ * to cross it.
+ *
+ * That choice is what makes the grant safe under every retry shape at once. A
+ * key derived from the match would be unique per match and would therefore pay
+ * twice if the solve counter were ever recomputed; keying on "how many puzzles
+ * has this player solved" means the answer to *should this grant exist* is a
+ * function of the player's history rather than of when the code ran. Replay the
+ * settlement, re-run a backfill, race two workers — all three produce milestone
+ * 7 and collide on the constraint.
+ */
+export function hintGrantKey(userId: string, milestone: number): string {
+  return `sudoku-hint:${userId}:${milestone}`
+}
+
+/**
+ * The spend side, keyed by the move that caused it: `seq` is the event sequence
+ * number the hint will be appended at, which is unique per game and known before
+ * `applyMove` runs. A socket ack retried after a dropped connection replays the
+ * same `seq` and therefore cannot charge twice.
+ */
+export function hintSpendKey(gameId: string, seat: number, seq: number): string {
+  return `sudoku-hint-spend:${gameId}:${seat}:${seq}`
 }
 
 /**

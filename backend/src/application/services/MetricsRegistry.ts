@@ -162,6 +162,10 @@ export const COUNTERS = [
   'reconciliations_run',
   'reconciliation_drift_detected',
 
+  // ── games/sudoku.md §13 — hint points ────────────────────────────────────
+  'sudoku_hint_points_granted',
+  'sudoku_hint_points_spent',
+
   // ── 12-admin-console.md, S49 ─────────────────────────────────────────────
   //   `admin_mfa_failed` is the one worth watching. A handful a week is an
   //   operator fumbling a code; a burst is somebody working through a

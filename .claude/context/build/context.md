@@ -1,18 +1,59 @@
 # Live Context — read this first, every session
 
-**Last updated:** 2026-09-15
+**Last updated:** 2026-09-16
 
 ## Where we are
 
 | | |
 |---|---|
-| **Milestone** | M0 — Platform Skeleton |
-| **Last session completed** | **S01–S44 (Phases A–J) + S48–S50 (Phase L) built and green — Phases J and L not yet verified by Mehrang** |
-| **Next session** | **S45 — Dockerfiles, dev compose, CI** (3 h, 🖥️) — Phase K, the one phase now skipped |
+| **Milestone** | M0 — Platform Skeleton, plus **M1 Sudoku started out of order** |
+| **Last session completed** | **S01–S44 (Phases A–J) + S48–S50 (Phase L)**, and now **M1's Sudoku engine + hint-point economy (backend only)** |
+| **Next session** | **The Sudoku frontend renderer** — the engine is done and registered but `comingSoon: true`, so it is not yet reachable from the UI. Then S45 (Phase K) |
 | **Blocked on** | Nothing in code. The two older environment items only (port 3000, Playwright deps) |
-| **Repo state** | `backend/` and `frontend/` exist. **1987 backend tests**, **154 frontend tests**. No `admin-frontend/` (MA) |
+| **Repo state** | `backend/` and `frontend/` exist. **2065 backend tests**, 154 frontend. No `admin-frontend/` (MA) |
 
 Session spec for S45: `Documents/11-build-plan.md` §12.
+
+### ⚠ M1 Sudoku was started before Phase K — backend complete, frontend not
+
+Mehrang chose on **2026-09-16** to start Sudoku, which defers Phase K a second
+time. What exists:
+
+| Built | Where |
+|---|---|
+| Grid geometry, candidate bitmasks | `backend/src/domain/games/sudoku/grid.ts` |
+| Technique solver, grader, `nextHint`, uniqueness counter | `…/sudoku/solver.ts` |
+| Generator — technique-targeted digging, seeded, ~100 ms worst case | `…/sudoku/generator.ts` |
+| The engine: state, moves, projection, result | `…/sudoku/engine.ts` |
+| Hint points: earn every 3 solves, spend one per hint | `backend/src/application/services/SudokuHintService.ts` |
+| 63 tests (47 engine + 16 hint economy) | `backend/tests/unit/games/sudoku-*.test.ts` |
+
+**Two new seams were added to game-agnostic services**, both keyed by slug so no
+generic service learns a Sudoku rule:
+
+- `GameSessionDeps.moveAuthorizers` — a pre-move hook inside the move's
+  transaction. Sudoku uses it to decide and charge a hint's funding, then
+  rewrite the move. Shelem/Poker will need nothing like it; if a second game
+  does, this is where it goes.
+- `SettlementServiceDeps.hooks` — a per-game settlement hook that returns the
+  new `PlayerStats.extra` blob and may credit inside settlement's transaction.
+  This is the **first** writer of `extraJson`, which had been declared and
+  unused since S03.
+
+**Still owed for Sudoku:**
+
+| Owed | Note |
+|---|---|
+| `frontend/src/features/games/sudoku/` renderer | 9×9 grid in a `dir="ltr"` island, number pad, note mode, Persian numerals, the hint button and its explanation panel. §9 of the spec is the brief |
+| `comingSoon: false` in `sudoku/meta.ts` | Deliberately still `true` — the flag means "playable", and without a renderer it is not |
+| `expectedMinMs` / reward rule tuning | Sudoku is the easiest game to farm (§12); the seeded `sudoku` + `sudoku:race` rules exist but have not been played against |
+| E2E | `frontend/e2e/` has nothing for Sudoku yet |
+
+**Spec corrections made in the same pass** (`Documents/games/sudoku.md`): §1's
+given-count table was wrong — it described digging targets that produce the
+wrong difficulty four times in five — and is now measured observations with the
+technique column marked as the definition. §13 is new and is the hint-point
+spec. §3's `HINT` move gained a server-authored `funding` field.
 
 ### ⚠ Phase K was skipped, on purpose — and it owes Phase L two things
 

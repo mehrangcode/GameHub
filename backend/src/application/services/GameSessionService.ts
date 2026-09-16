@@ -116,6 +116,40 @@ export interface GameSessionDeps {
    * interest in either.
    */
   readonly turns?: TurnObserver
+  /**
+   * Slug → a pre-move hook, run inside the move's transaction just before the
+   * engine (M1, for Sudoku's hint points).
+   *
+   * A seam rather than an `if (slug === 'sudoku')` here, because the thing it
+   * exists for — charging a player for a move — is exactly what a pure engine
+   * cannot do and exactly what this service must not learn game rules to do.
+   * Absent for every game that has no such move, which is all of them but one.
+   */
+  readonly moveAuthorizers?: Readonly<Record<string, MoveAuthorizer>>
+}
+
+/**
+ * A chance to inspect, charge for, or rewrite a move before the engine sees it.
+ *
+ * Returns the move to actually apply. Rewriting is the point: Sudoku's client
+ * sends `{ type: 'HINT' }` and the authorizer decides — and records — whether
+ * that hint came out of the free allowance or out of a hint point, filling in
+ * the `funding` field the engine then trusts. A client cannot author it, for
+ * the same reason it cannot author its own seat.
+ *
+ * Runs in the caller's transaction, so anything it writes rolls back with a
+ * move that fails to commit.
+ */
+export interface MoveAuthorizer {
+  authorize(input: {
+    readonly repos: Repositories
+    readonly instance: GameInstance
+    readonly state: unknown
+    readonly seat: SeatId
+    readonly move: Record<string, unknown>
+    /** The seq the input event will take — derived, so a retry cannot double-charge. */
+    readonly inputSeq: number
+  }): Promise<Record<string, unknown>>
 }
 
 /** Who is asking. `isHost` is derived from the table row, never from a request. */
@@ -469,7 +503,21 @@ export class GameSessionService {
     const inputSeq = seq + 1
     const rng = gameRng(instance.rngSeed, inputSeq)
 
-    const first = engine.applyMove(state, seat, move, rng)
+    /**
+     * ★ The pre-move hook. Charges for the move and may rewrite it — Sudoku's
+     * hint funding is decided here, never read from the client's payload.
+     *
+     * Before the engine, inside this transaction: a move whose events fail to
+     * append rolls the charge back with it, which is what removes the need for
+     * a refund path nobody would ever exercise.
+     */
+    const authorizer = this.deps.moveAuthorizers?.[instance.gameSlug]
+    const effective =
+      authorizer === undefined
+        ? move
+        : await authorizer.authorize({ repos, instance, state, seat, move, inputSeq })
+
+    const first = engine.applyMove(state, seat, effective, rng)
     const advanced = this.runAdvance(engine, first.state, rng)
 
     const emitted = [...first.events, ...advanced.events]
@@ -489,7 +537,11 @@ export class GameSessionService {
         // `PHASE` row that also carried it would occupy the unique slot and
         // make a legitimate retry look like a replay of something it never sent.
         ...(index === 0 ? { clientMoveId } : {}),
-        payload: index === 0 ? { ...event.payload, ...system.extra, move } : event.payload,
+        // ★ `effective`, not `move`: the log records the move as applied,
+        // including a funding decision the client never sent. A log that stored
+        // the client's version would replay into a different state.
+        payload:
+          index === 0 ? { ...event.payload, ...system.extra, move: effective } : event.payload,
       } satisfies NewGameEvent)
 
       if (index === 0 && row.seq !== inputSeq) {

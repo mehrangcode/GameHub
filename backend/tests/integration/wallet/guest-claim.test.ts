@@ -1,6 +1,7 @@
 import request from 'supertest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AUTH_COOKIES } from '../../../src/contracts/dto/auth.js'
+import { ASSET_CODES } from '../../../src/contracts/enums.js'
 import { PrismaWalletRepository } from '../../../src/infrastructure/prisma/repositories/economy.js'
 import { PrismaGameEventRepository } from '../../../src/infrastructure/prisma/repositories/games.js'
 import { buildTestApp } from '../../helpers/app.js'
@@ -415,12 +416,9 @@ describe('POST /auth/guest/claim — the happy path', () => {
     expect(after.body.balances).toContainEqual(
       expect.objectContaining({ asset: 'COIN', balance: 120, status: 'VESTED' }),
     )
-    // A user holds all three assets from the moment the account exists.
-    expect(after.body.balances.map((b: { asset: string }) => b.asset)).toEqual([
-      'COIN',
-      'GEM',
-      'TICKET',
-    ])
+    // A user holds every asset from the moment the account exists — including
+    // `HINT`, which a guest never accrues (`games/sudoku.md` §13.1).
+    expect(after.body.balances.map((b: { asset: string }) => b.asset)).toEqual([...ASSET_CODES])
 
     // And the statement — a user's route, which the guest half of this journey
     // deliberately cannot reach.

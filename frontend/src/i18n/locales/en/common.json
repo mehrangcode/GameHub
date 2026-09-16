@@ -29,6 +29,7 @@
     "coin": "Coins",
     "gem": "Gems",
     "ticket": "Tickets",
+    "hint": "Hint points",
     "provisional": "Held until you sign up"
   },
   "theme": {

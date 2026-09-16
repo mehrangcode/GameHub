@@ -640,7 +640,7 @@ model Wallet {
   /// Exactly one of userId / guestSessionId is set.
   userId         String?
   guestSessionId String?
-  assetCode      String // COIN | GEM | TICKET
+  assetCode      String // COIN | GEM | TICKET | HINT
 
   /// ★ CACHED. Truth is Σ transactions. Written only inside the transaction
   /// that appends the corresponding WalletTransaction (E1).
@@ -674,7 +674,8 @@ model WalletTransaction {
   amount Int
 
   /// MATCH_REWARD | DAILY_BONUS | ACHIEVEMENT | PREMIUM_GRANT | PURCHASE
-  /// | REFUND | GUEST_VEST | GUEST_FORFEIT | ADMIN_ADJUST | CAP_REJECTED
+  /// | REFUND | GUEST_VEST | GUEST_FORFEIT | ADMIN_ADJUST | HINT_GRANT
+  /// | HINT_SPEND | CAP_REJECTED
   kind String
 
   /// ★ Derived, never random. UNIQUE per wallet — this IS idempotency (E2).

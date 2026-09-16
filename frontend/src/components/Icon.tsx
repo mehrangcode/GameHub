@@ -93,6 +93,11 @@ export function IconSprite() {
           <path d="M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4V8Z" />
           <path d="M13 6v12" />
         </symbol>
+        {/* A lightbulb: a hint point, the currency a Sudoku hint spends. */}
+        <symbol id="i-hint" viewBox="0 0 24 24">
+          <path d="M9 18h6M10 21h4" />
+          <path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5.9 1.2.9 2h5.2c0-.8.3-1.5.9-2A6 6 0 0 0 12 3Z" />
+        </symbol>
         <symbol id="i-moon" viewBox="0 0 24 24">
           <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5Z" />
         </symbol>

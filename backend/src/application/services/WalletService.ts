@@ -341,56 +341,73 @@ export class WalletService {
    * is the thing worth getting right while it is cheap to test.
    */
   async debit(input: DebitInput): Promise<CreditResult> {
-    this.assertSpendable(input)
-
-    const result = await this.deps.uow.run(async (repos) => {
-      const wallet = await repos.wallets.ensure(input.holder, input.asset)
-
-      const existing = await repos.wallets.findTransactionByKey(wallet.id, input.idempotencyKey)
-      if (existing) {
-        this.deps.metrics.increment('wallet_credits_replayed')
-        return {
-          transaction: existing,
-          wallet,
-          applied: false,
-          requested: input.amount,
-          credited: existing.amount,
-          capCode: null,
-        }
-      }
-
-      const available = await repos.wallets.balanceForUpdate(wallet.id)
-      if (available < input.amount && input.allowOverdraft !== true) {
-        this.deps.metrics.increment('wallet_debits_refused')
-        throw new InsufficientFundsError(input.amount, available, { asset: input.asset })
-      }
-
-      const appended = await repos.wallets.append({
-        walletId: wallet.id,
-        amount: -input.amount,
-        kind: input.kind,
-        idempotencyKey: input.idempotencyKey,
-        reason: input.reason ?? null,
-        refKind: input.refKind ?? null,
-        refId: input.refId ?? null,
-      })
-
-      this.deps.metrics.increment('wallet_debits')
-      return {
-        transaction: appended.transaction,
-        wallet: appended.wallet,
-        applied: appended.applied,
-        requested: input.amount,
-        credited: -input.amount,
-        capCode: null,
-      }
-    })
+    const result = await this.deps.uow.run(async (repos) => this.debitWithin(repos, input))
 
     await this.announce(input.holder, input.asset, {
       delta: result.applied ? -input.amount : 0,
       reason: input.reason ?? input.kind,
     })
     return result
+  }
+
+  /**
+   * The debit, in a transaction the **caller** owns — the mirror of
+   * {@link creditWithin}, and for the same reason it exists.
+   *
+   * Sudoku's hint spend (`games/sudoku.md` §13.3) is the first caller. A hint is
+   * charged inside the transaction that also appends the move's events, so the
+   * two commit or roll back together. Doing it any other way means a move whose
+   * event-append fails leaves a point spent, and recovering from that needs a
+   * refund path — code written once and then never exercised until the day it is
+   * wrong. One rollback covering both is strictly less machinery.
+   *
+   * Announces nothing, exactly like `creditWithin`: the balance is not real
+   * until the caller's transaction commits, and telling a client otherwise is
+   * the one lie this service must not tell.
+   */
+  async debitWithin(repos: Repositories, input: DebitInput): Promise<CreditResult> {
+    this.assertSpendable(input)
+
+    const wallet = await repos.wallets.ensure(input.holder, input.asset)
+
+    const existing = await repos.wallets.findTransactionByKey(wallet.id, input.idempotencyKey)
+    if (existing) {
+      this.deps.metrics.increment('wallet_credits_replayed')
+      return {
+        transaction: existing,
+        wallet,
+        applied: false,
+        requested: input.amount,
+        credited: existing.amount,
+        capCode: null,
+      }
+    }
+
+    const available = await repos.wallets.balanceForUpdate(wallet.id)
+    if (available < input.amount && input.allowOverdraft !== true) {
+      this.deps.metrics.increment('wallet_debits_refused')
+      throw new InsufficientFundsError(input.amount, available, { asset: input.asset })
+    }
+
+    const appended = await repos.wallets.append({
+      walletId: wallet.id,
+      amount: -input.amount,
+      kind: input.kind,
+      idempotencyKey: input.idempotencyKey,
+      reason: input.reason ?? null,
+      refKind: input.refKind ?? null,
+      refId: input.refId ?? null,
+    })
+
+    this.deps.metrics.increment('wallet_debits')
+    return {
+      transaction: appended.transaction,
+      wallet: appended.wallet,
+      applied: appended.applied,
+      requested: input.amount,
+      credited: -input.amount,
+      capCode: null,
+    }
   }
 
   /**

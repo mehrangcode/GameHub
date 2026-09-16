@@ -14,6 +14,7 @@ export type IconName =
   | 'coin'
   | 'gem'
   | 'ticket'
+  | 'hint'
   | 'moon'
   | 'sun'
   | 'plus'

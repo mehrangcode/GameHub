@@ -2294,7 +2294,7 @@
               }
             ],
             "url": "{{api}}/wallet",
-            "description": "A user holds COIN, GEM and TICKET from the moment the account exists (10 §2.1) — retrofitting a second asset onto a single-balance schema is a migration nobody enjoys."
+            "description": "A user holds COIN, GEM, TICKET and HINT from the moment the account exists (10 §2.1; HINT is Sudoku's hint point, games/sudoku.md §13) — retrofitting a second asset onto a single-balance schema is a migration nobody enjoys."
           },
           "event": [
             {
@@ -2303,9 +2303,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "const body = pm.response.json();",
-                  "pm.test('200 — COIN, GEM, TICKET, every one VESTED', () => {",
+                  "pm.test('200 — COIN, GEM, TICKET, HINT, every one VESTED', () => {",
                   "  pm.response.to.have.status(200);",
-                  "  pm.expect(body.balances.map(b => b.asset)).to.eql(['COIN', 'GEM', 'TICKET']);",
+                  "  pm.expect(body.balances.map(b => b.asset)).to.eql(['COIN', 'GEM', 'TICKET', 'HINT']);",
                   "  body.balances.forEach(b => pm.expect(b.status).to.eql('VESTED'));",
                   "});"
                 ]
@@ -2458,9 +2458,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "const body = pm.response.json();",
-                  "pm.test('200 — COIN, GEM, TICKET, all VESTED', () => {",
+                  "pm.test('200 — COIN, GEM, TICKET, HINT, all VESTED', () => {",
                   "  pm.response.to.have.status(200);",
-                  "  pm.expect(body.balances.map(b => b.asset)).to.eql(['COIN', 'GEM', 'TICKET']);",
+                  "  pm.expect(body.balances.map(b => b.asset)).to.eql(['COIN', 'GEM', 'TICKET', 'HINT']);",
                   "  body.balances.forEach(b => pm.expect(b.status).to.eql('VESTED'));",
                   "});",
                   "pm.test('every balance is a whole number of coins', () => {",

@@ -131,12 +131,12 @@ in particular the one that needs doing by hand: corrupt a balance and watch the 
 
 ### Phase J — Frontend
 
-- [x] S39 Axios instance, single-flight refresh, `authStore`, login/register
-- [x] S40 `tokens.css`, `themeStore`, i18n en+fa, `dir` switching
-- [x] S41 Welcome page — registry-driven preview cards
-- [x] S42 `socketStore` + socket manager + `seq` gap detection
-- [x] S43 ⭐ Invite landing → guest join
-- [x] S44 `TableShell` — seats, presence, chat, countdown ring, nudge
+- [✅] S39 Axios instance, single-flight refresh, `authStore`, login/register
+- [✅] S40 `tokens.css`, `themeStore`, i18n en+fa, `dir` switching
+- [✅] S41 Welcome page — registry-driven preview cards
+- [✅] S42 `socketStore` + socket manager + `seq` gap detection
+- [✅] S43 ⭐ Invite landing → guest join
+- [✅] S44 `TableShell` — seats, presence, chat, countdown ring, nudge
 
 ### Phase K — Ship
 
@@ -150,9 +150,9 @@ _Built and green, **out of order** — Mehrang chose to skip Phase K to code and
 take Phase L first (2026-09-15). The only two things L wanted from K are deploy
 artifacts, recorded as debt in `context.md`; no code in L depends on them._
 
-- [ ] S48 Admin schema + `admin-main.ts` + the three isolation guards
-- [ ] S49 Admin auth: TOTP, forced enrollment, step-up, sessions
-- [ ] S50 ⭐ The `withAudit` spine + first read endpoints + M0's admin gate
+- [✅] S48 Admin schema + `admin-main.ts` + the three isolation guards
+- [✅] S49 Admin auth: TOTP, forced enrollment, step-up, sessions
+- [✅] S50 ⭐ The `withAudit` spine + first read endpoints + M0's admin gate
 
 ---
 
@@ -161,7 +161,15 @@ artifacts, recorded as debt in `context.md`; no code in L depends on them._
 Outlined in `Documents/11-build-plan.md` §14. Each milestone's first session is a planning pass that
 expands its outline into full session specs. Do not start a milestone without that pass.
 
-- [ ] M1 Sudoku (~11)
+- [🚧] M1 Sudoku (~11) — **backend done, frontend not**. Started 2026-09-16 ahead of Phase K,
+      without the planning pass (scope came straight from `Documents/games/sudoku.md`).
+  - [✅] Grid geometry, technique solver + grader, `nextHint`, uniqueness counter
+  - [✅] Generator — technique-targeted digging, seeded, ~100 ms worst case
+  - [✅] The engine: state, moves, per-viewer projection, result. 47 tests, invariants I1–I5
+  - [✅] Hint points (§13): `HINT` wallet asset, earn 1 per 3 solves, spend 1 per hint. 16 tests
+  - [ ] The renderer — `frontend/src/features/games/sudoku/`, spec §9
+  - [ ] Flip `comingSoon: false` once the renderer exists
+  - [ ] E2E, and a played-against pass on `expectedMinMs` / the reward rule
 - [ ] M2 Blackjack (~15) — includes the admin ledger browser + reconciliation
 - [ ] M3 Matchmaking (~17) — includes game flags + the control-command outbox
 - [ ] M4 Shelem ⭐ (~26)

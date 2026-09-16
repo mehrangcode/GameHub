@@ -7,6 +7,7 @@ import type {
   MatchResult,
   SeatAssignment,
 } from '../../domain/entities/game.js'
+import { holderOf } from '../../domain/entities/game.js'
 import { matchRewardKey } from '../../domain/economy/idempotency.js'
 import type { GameResult, GameStanding } from '../../domain/games/GameEngine.js'
 import type { TableMember } from '../../domain/entities/table.js'
@@ -94,6 +95,38 @@ export interface SettlementServiceDeps {
   readonly metrics: MetricsRegistry
   readonly logger: Logger
   readonly now?: () => Date
+  /**
+   * Slug → a per-game settlement hook. Optional, and absent for every game
+   * that has nothing game-specific to record.
+   */
+  readonly hooks?: Readonly<Record<string, SettlementHook>>
+}
+
+/**
+ * A game's chance to write its own counters — and grant its own currency —
+ * inside the settlement transaction.
+ *
+ * Returns the new `PlayerStats.extra` blob for this seat, or `null` to leave it
+ * alone. The blob is **replaced**, not merged, so a hook returns the previous
+ * value with its own keys changed; `previousExtra` is supplied for exactly
+ * that.
+ *
+ * Running inside settlement's transaction is the point rather than a
+ * convenience: Sudoku's hook increments a solve counter *and* grants the hint
+ * point that counter earns, and a counter that committed without its grant
+ * would hand the player a milestone they never receive.
+ */
+export interface SettlementHook {
+  onSeatSettled(input: {
+    readonly repos: Repositories
+    readonly instance: GameInstance
+    readonly result: GameResult
+    readonly matchResultId: string
+    readonly seat: SeatId
+    readonly holder: IdentityRef
+    readonly outcome: SeatOutcome
+    readonly previousExtra: Record<string, unknown> | null
+  }): Promise<Record<string, unknown> | null>
 }
 
 export class SettlementService {
@@ -239,7 +272,7 @@ export class SettlementService {
     let total = 0
 
     for (const plan of plans) {
-      const settledSeat = await this.settleSeat(repos, instance, matchResult, plan)
+      const settledSeat = await this.settleSeat(repos, instance, matchResult, plan, result)
       total += settledSeat?.coinsAwarded ?? 0
       if (settledSeat !== null) payloads.push(settledSeat)
     }
@@ -254,6 +287,7 @@ export class SettlementService {
     instance: GameInstance,
     matchResult: MatchResult,
     plan: SeatPlan,
+    result: GameResult,
   ): Promise<GameRewardSettledPayload | null> {
     /**
      * ★ A bot gets a `MatchParticipant` row and **no wallet transaction of any
@@ -326,7 +360,7 @@ export class SettlementService {
       playedFraction: plan.standing.playedFraction,
     })
 
-    await this.recordStats(repos, instance, plan)
+    await this.recordStats(repos, instance, plan, result, matchResult.id)
 
     this.deps.metrics.increment(coinsAwarded > 0 ? 'rewards_paid' : 'rewards_forfeited')
 
@@ -358,6 +392,8 @@ export class SettlementService {
     repos: Repositories,
     instance: GameInstance,
     plan: SeatPlan,
+    result: GameResult,
+    matchResultId: string,
   ): Promise<void> {
     if (plan.holder?.kind !== 'user') return
 
@@ -366,6 +402,29 @@ export class SettlementService {
     const previous = await repos.stats.findByUserAndGame(plan.holder.userId, instance.gameSlug)
     // A draw neither extends a winning streak nor breaks it — it is not a loss.
     const streak = won ? (previous?.currentStreak ?? 0) + 1 : drawn ? (previous?.currentStreak ?? 0) : 0
+
+    /**
+     * ★ The per-game seam — `PlayerStats.extraJson` is documented as
+     * "game-specific counters", and this is how a game gets to write one
+     * without this service learning its rules. Sudoku uses it to count solved
+     * puzzles and, every third, to grant a hint point (`games/sudoku.md` §13.1)
+     * — inside this same transaction, so the count and the point cannot
+     * disagree.
+     */
+    const hook = this.deps.hooks?.[instance.gameSlug]
+    const extra =
+      hook === undefined
+        ? undefined
+        : await hook.onSeatSettled({
+            repos,
+            instance,
+            result,
+            matchResultId,
+            seat: plan.seat,
+            holder: plan.holder,
+            outcome: plan.outcome,
+            previousExtra: previous?.extra ?? null,
+          })
 
     await repos.stats.upsert(plan.holder.userId, instance.gameSlug, {
       played: (previous?.played ?? 0) + 1,
@@ -376,6 +435,7 @@ export class SettlementService {
       currentStreak: streak,
       bestStreak: Math.max(previous?.bestStreak ?? 0, streak),
       totalMs: (previous?.totalMs ?? 0) + 0,
+      ...(extra === null || extra === undefined ? {} : { extra }),
     })
   }
 
@@ -461,15 +521,6 @@ function resolveOutcome(
   if (member === undefined) return standing.outcome
   const derived = seatOutcomeOf(member, events)
   return derived === 'COMPLETED' ? standing.outcome : derived
-}
-
-function holderOf(assignment: SeatAssignment): IdentityRef | null {
-  if (assignment.isBot) return null
-  if (assignment.userId !== null) return { kind: 'user', userId: assignment.userId }
-  if (assignment.guestSessionId !== null) {
-    return { kind: 'guest', guestSessionId: assignment.guestSessionId }
-  }
-  return null
 }
 
 /** Left before the end under their own steam — an ejection or a resignation. */

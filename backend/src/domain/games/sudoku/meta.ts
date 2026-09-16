@@ -12,7 +12,14 @@ export const sudokuOptionsSchema = z
   .object({
     difficulty: z.enum(['easy', 'medium', 'hard', 'expert']).default('medium'),
     mode: z.enum(['solo', 'race']).default('solo'),
+    /** Free hints per seat per match, before hint points are touched (§13.1). */
     maxHints: z.number().int().min(0).max(10).default(3),
+    /**
+     * Whether a seat may spend banked hint points once `maxHints` is gone.
+     * `false` makes the match a pure test of the player — what a tournament
+     * preset wants, and why this is an option rather than a constant.
+     */
+    allowHintPoints: z.boolean().default(true),
     allowNotes: z.boolean().default(true),
     autoCheckOnComplete: z.boolean().default(true),
     raceFinishWindowSec: z.number().int().min(0).max(300).default(60),

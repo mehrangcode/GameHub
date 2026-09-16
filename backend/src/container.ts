@@ -24,6 +24,7 @@ import { RewardService } from './application/services/RewardService.js'
 import { SeatEnforcementService } from './application/services/SeatEnforcementService.js'
 import { SecurityEventService } from './application/services/SecurityEventService.js'
 import { SettlementService } from './application/services/SettlementService.js'
+import { SudokuHintService } from './application/services/SudokuHintService.js'
 import { TableService } from './application/services/TableService.js'
 import { TurnTimerService } from './application/services/TurnTimerService.js'
 import { WalletService } from './application/services/WalletService.js'
@@ -31,6 +32,7 @@ import type { AdminEnv, Env } from './config/env.js'
 import { getEnv } from './config/env.js'
 import { AdminTokenIssuer, Aes256TotpProvider } from './infrastructure/admin/adapters.js'
 import { buildGameRegistry, type GameRegistry } from './domain/games/registry.js'
+import { sudokuEngine } from './domain/games/sudoku/engine.js'
 import type { IUnitOfWork, Repositories } from './domain/repositories/Repositories.js'
 import {
   Argon2PasswordHasher,
@@ -273,7 +275,10 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
    * from `env` rather than from `process.env` so a test can build a production
    * container and assert the dev game is genuinely absent.
    */
-  const registry = buildGameRegistry({ includeDevGames: env.NODE_ENV !== 'production' })
+  const registry = buildGameRegistry({
+    includeDevGames: env.NODE_ENV !== 'production',
+    engines: [sudokuEngine],
+  })
   const catalog = new GameCatalogService(registry)
 
   const tables = new TableService({ repos, catalog, security, metrics, logger, realtime })
@@ -322,6 +327,14 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
    */
   const rewards = new RewardService({ repos })
 
+  /**
+   * M1 — Sudoku's hint points (`games/sudoku.md` §13). One service, both halves
+   * of the rule: it charges for a hint through the move pipeline's authorizer
+   * seam, and grants one back through settlement's hook seam. Registered by
+   * slug in both, so no game-agnostic service learns a Sudoku rule.
+   */
+  const sudokuHints = new SudokuHintService({ wallets, metrics, logger })
+
   const settlement = new SettlementService({
     uow,
     repos,
@@ -330,6 +343,7 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
     realtime,
     metrics,
     logger,
+    hooks: { sudoku: sudokuHints.asSettlementHook() },
   })
 
   const games = new GameSessionService({
@@ -347,6 +361,7 @@ export function buildContainer(overrides: ContainerOverrides = {}): Container {
     clock: overrides.clock ?? systemClock,
     turns,
     settlement,
+    moveAuthorizers: { sudoku: sudokuHints.asMoveAuthorizer() },
   })
 
   const turnTimers = new TurnTimerService({

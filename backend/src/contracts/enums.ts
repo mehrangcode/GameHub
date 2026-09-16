@@ -128,7 +128,18 @@ export type AnimationSpeed = (typeof ANIMATION_SPEEDS)[number]
 export const AnimationSpeedSchema = z.enum(ANIMATION_SPEEDS)
 
 // ── Economy ──────────────────────────────────────────────────────────────────
-export const ASSET_CODES = ['COIN', 'GEM', 'TICKET'] as const
+/**
+ * `HINT` is a Sudoku hint point (`games/sudoku.md` §13) and rides the wallet for
+ * one reason: the ledger already guarantees everything a spendable balance needs
+ * — append-only rows, a balance that is Σ transactions, derived idempotency keys
+ * under a unique constraint, the row-locked debit, reconciliation. A bespoke
+ * counter would have to earn all of that back, and would get it wrong.
+ *
+ * It is **never** purchasable: a hint point is a gameplay advantage, so the
+ * no-pay-to-win rule bars a store item, a premium grant and a COIN exchange
+ * alike. Earned at 1 per 3 solved puzzles, spent one per hint.
+ */
+export const ASSET_CODES = ['COIN', 'GEM', 'TICKET', 'HINT'] as const
 export type AssetCode = (typeof ASSET_CODES)[number]
 export const AssetCodeSchema = z.enum(ASSET_CODES)
 
@@ -147,6 +158,10 @@ export const TRANSACTION_KINDS = [
   'GUEST_VEST',
   'GUEST_FORFEIT',
   'ADMIN_ADJUST',
+  /** Earned a Sudoku hint point — one per 3 solves (`games/sudoku.md` §13.1). */
+  'HINT_GRANT',
+  /** Spent one on a hint, inside the move's own transaction (§13.3). */
+  'HINT_SPEND',
   /** Zero-amount audit row: the credit was capped. Never silence. */
   'CAP_REJECTED',
 ] as const

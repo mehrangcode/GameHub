@@ -3,7 +3,50 @@
   "poker": { "name": "Texas Hold'em", "tagline": "No-limit, table chips only" },
   "blackjack": { "name": "Blackjack", "tagline": "Dealer stands on 17" },
   "chess": { "name": "Chess", "tagline": "Rapid, 10+5" },
-  "sudoku": { "name": "Sudoku", "tagline": "Solo, four difficulties" },
+  "sudoku": {
+    "name": "Sudoku",
+    "tagline": "Solo, four difficulties",
+    "difficulty": {
+      "easy": "Easy",
+      "medium": "Medium",
+      "hard": "Hard",
+      "expert": "Expert"
+    },
+    "move": {
+      "setCell": "{{name}} wrote {{value}} at R{{row}}C{{col}}",
+      "clearCell": "{{name}} cleared R{{row}}C{{col}}",
+      "setNotes": "{{name}} pencilled R{{row}}C{{col}}",
+      "check": "{{name}} checked the grid",
+      "hint": "{{name}} used a hint",
+      "giveUp": "{{name}} gave up"
+    },
+    "technique": {
+      "nakedSingle": "only one digit fits this cell",
+      "hiddenSingle": "hidden single in {{unit}} {{n}}",
+      "nakedPair": "naked pair in {{unit}} {{n}}",
+      "hiddenPair": "hidden pair in {{unit}} {{n}}",
+      "pointingPair": "pointing pair in {{unit}} {{n}}",
+      "boxLineReduction": "box/line reduction in {{unit}} {{n}}",
+      "xWing": "X-wing",
+      "guess": "the only digit that leads to a solution"
+    },
+    "unit": { "row": "row", "col": "column", "box": "box" },
+    "hint": {
+      "points": "Hint points",
+      "free": "{{count}} free hints left",
+      "spend": "Use a hint point",
+      "result": "R{{row}}C{{col}} must be {{value}} — {{because}}",
+      "mistake": "One of your entries is wrong. Those cells are marked — nothing was charged.",
+      "none": "Nothing left to fill.",
+      "earn": "Solve {{count}} more puzzles to earn a hint point"
+    },
+    "error": {
+      "hintUnavailable": "No hints available.",
+      "hintPointsDisabled": "Hint points are turned off for this table.",
+      "hintNeedsAccount": "Create an account to bank and spend hint points.",
+      "noFreeHints": "You have used your free hints for this puzzle."
+    }
+  },
 
   "card": {
     "players": "{{min}}–{{max}} players",

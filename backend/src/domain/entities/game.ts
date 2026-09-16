@@ -4,6 +4,7 @@ import type {
   MatchReason,
   SeatOutcome,
 } from '../../contracts/enums.js'
+import type { IdentityRef } from '../value-objects/identity.js'
 import type { SeatId } from '../value-objects/seat.js'
 
 /** Who sat where when the deal started, frozen so history survives seat changes. */
@@ -14,6 +15,23 @@ export interface SeatAssignment {
   readonly isBot: boolean
   readonly displayName: string
   readonly team: number | null
+}
+
+/**
+ * Who gets paid for this seat, or `null` when nobody does.
+ *
+ * Lives here rather than in the service that first needed it because "which
+ * wallet does seat 2 belong to" is a property of the seating, and two services
+ * answering it separately is how they come to disagree. A bot seat has no
+ * holder at all — there is nobody to pay and no wallet to pay into.
+ */
+export function holderOf(assignment: SeatAssignment): IdentityRef | null {
+  if (assignment.isBot) return null
+  if (assignment.userId !== null) return { kind: 'user', userId: assignment.userId }
+  if (assignment.guestSessionId !== null) {
+    return { kind: 'guest', guestSessionId: assignment.guestSessionId }
+  }
+  return null
 }
 
 export interface GameInstance {

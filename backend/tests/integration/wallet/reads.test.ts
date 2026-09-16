@@ -7,6 +7,7 @@ import {
   WalletTransactionSchema,
 } from '../../../src/contracts/dto/wallet.js'
 import { RewardRulesResponseSchema } from '../../../src/contracts/dto/rewards.js'
+import { ASSET_CODES } from '../../../src/contracts/enums.js'
 import { userRef, guestRef } from '../../../src/domain/value-objects/identity.js'
 
 /**
@@ -104,13 +105,16 @@ async function guestClient() {
 }
 
 describe('GET /wallet — level G, guests included', () => {
-  it('a new user sees three VESTED wallets at zero', async () => {
+  it('a new user sees one VESTED wallet per asset, all at zero', async () => {
     const { agent } = await registerUser(app)
 
     const res = await agent.get('/api/v1/wallet')
 
     expect(res.status).toBe(200)
-    expect(res.body.balances).toHaveLength(3)
+    // Derived from the contract rather than pinned at three: `AuthService`
+    // creates one wallet per `ASSET_CODES` entry, so a new asset — `HINT`, for
+    // Sudoku's hint points — should extend this test, not break it.
+    expect(res.body.balances).toHaveLength(ASSET_CODES.length)
     for (const balance of res.body.balances) {
       expect(() => WalletBalanceSchema.parse(balance)).not.toThrow()
       expect(balance).toMatchObject({ balance: 0, status: 'VESTED' })
